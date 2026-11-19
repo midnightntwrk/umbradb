@@ -61,7 +61,9 @@
  *   (the retention window, which the main thread computes; the state before the block when none is given); and the
  *   state and zswap-state keys of each contract {@link ApplyBlock.contracts} names, persisted and never released,
  *   flushed with the nodes they reach;
- * - each such contract's keys ({@link ContractKeys}).
+ * - each such contract's keys ({@link ContractKeys}); its zswap state key is built again only when the state's zswap
+ *   tree changed since it was last built for that contract, on the chain of states the engine holds, or when it was
+ *   dropped as the least recently used of the {@link ZSWAP_KEYS_KEPT} kept (`#zswapKey`).
  *
  * **A retained state** ({@link LedgerEngine.retained}) is loaded by its key beside the held states, its root read, and
  * the state dropped. The states the engine holds are left as they are.
@@ -270,6 +272,26 @@ export interface EngineOptions {
    * negative control's).
    */
   readonly checkPlainData?: boolean;
+  /** How many contracts' zswap state keys are kept at most: {@link ZSWAP_KEYS_KEPT} (a test's bound; 0 keeps none). */
+  readonly zswapKeysKept?: number;
+}
+
+/**
+ * How many contracts' zswap state keys the engine keeps at most (`#zswapKey`). Above it the least recently used is
+ * dropped, and built again when a block names that contract. It is above the 10,136 contracts Preprod held at height
+ * 3,436,566, so a sync of Preprod to that height drops none, not even at the block that converts a v8 state, which
+ * names every contract that state holds. An entry takes about 520 bytes (measured on Node 24: the address and the root
+ * as text, the first free index, the key), so the bound holds about 8 MiB.
+ */
+export const ZSWAP_KEYS_KEPT = 16_384;
+
+/** A contract's zswap state key kept (`#zswapKey`), with the package and the zswap tree it was built with. */
+interface ZswapKept {
+  readonly adapter: LedgerPackage;
+  readonly firstFree: bigint;
+  /** The zswap tree's root, as text. */
+  readonly root: string;
+  readonly key: Uint8Array;
 }
 
 /** A state the engine holds, with the block it is after. */
@@ -334,6 +356,13 @@ export class LedgerEngine {
   readonly #kept = new Map<string, Kept>();
   /** The adapters whose package has the node store installed. */
   readonly #installed = new WeakSet<LedgerPackage>();
+  /**
+   * The zswap state key kept for each contract, by address, the least recently used first, with the package and the
+   * zswap tree it was built with ({@link #zswapKey}): at most `#zswapKeysKept`; forgotten when the engine abandons a
+   * state ({@link #forgetZswapKeys}).
+   */
+  readonly #zswapKeys = new Map<string, ZswapKept>();
+  readonly #zswapKeysKept: number;
   #committed: Held | null = null;
   #pending: (Held & { readonly result: AppliedState }) | null = null;
 
@@ -342,6 +371,9 @@ export class LedgerEngine {
     this.#store = options.store;
     this.#tasks = options.tasks ?? new Map();
     this.#checkPlainData = options.checkPlainData !== false;
+    const kept = options.zswapKeysKept ?? ZSWAP_KEYS_KEPT;
+    if (!Number.isSafeInteger(kept) || kept < 0) throw new RangeError(`the ledger engine keeps a whole number of zswap state keys, not ${kept}`);
+    this.#zswapKeysKept = kept;
   }
 
   /** `value` as it leaves the worker, checked as plain data (see {@link EngineOptions.checkPlainData}); throws `fail`'s. */
@@ -432,19 +464,27 @@ export class LedgerEngine {
     const stateRoot = timed("stateRoot", () => adapter.stateRoot(state));
     const summary = timed("summary", () => adapter.stateSummary(state));
     timed("persist", () => adapter.persist(key));
-    const contracts = timed("contracts", () =>
-      keys.contracts.map((address): ContractKeys => {
-        const stateKey = adapter.contractStateKey(state, address);
-        const zswapStateKey = adapter.contractZswapStateKey(state, address);
-        if (stateKey !== null) adapter.persist(stateKey);
-        if (zswapStateKey !== null) adapter.persist(zswapStateKey);
-        return { address, stateKey, zswapStateKey };
-      }),
-    );
-    timed("release", () => {
-      for (const released of keys.release) adapter.release(released);
-    });
-    const batch = timed("flush", () => adapter.flush());
+    let contracts: ContractKeys[];
+    let batch: NodeBatch;
+    try {
+      contracts = timed("contracts", () =>
+        keys.contracts.map((address): ContractKeys => {
+          const stateKey = adapter.contractStateKey(state, address);
+          const zswapStateKey = this.#zswapKey(adapter, state, address, summary, stateKey !== null);
+          if (stateKey !== null) adapter.persist(stateKey);
+          if (zswapStateKey !== null) adapter.persist(zswapStateKey);
+          return { address, stateKey, zswapStateKey };
+        }),
+      );
+      timed("release", () => {
+        for (const released of keys.release) adapter.release(released);
+      });
+      batch = timed("flush", () => adapter.flush());
+    } catch (error) {
+      // The state is abandoned: no zswap state key built from it may outlive it (see `#zswapKey`).
+      this.#forgetZswapKeys();
+      throw error;
+    }
     const result: AppliedState = {
       ledger: block.ledger,
       height: block.height,
@@ -460,6 +500,52 @@ export class LedgerEngine {
   }
 
   /**
+   * The zswap state key of the contract `address` in `state`, whose summary is `summary`; `held` is whether `state`
+   * holds the contract (its contract state key is not null). The package builds the key from the state's commitment
+   * tree with every range that is not the contract's collapsed, up to the tree's first free index, and has none for a
+   * contract the state does not hold (nothing is kept for it). The key the same package built for the same tree (the
+   * same first free index and root) is returned again and the package is not asked: most blocks that touch a contract
+   * add no commitment. One key is kept per contract, at most {@link ZSWAP_KEYS_KEPT} (or the engine's option) in all:
+   * each key returned or built becomes the most recently used, and above the bound the least recently used is
+   * dropped, to be built again when it is asked for. The kept key is this state's because of three things, the first
+   * two enforced here:
+   * - `state` holds the contract: for a state that does not, the package is asked, whatever is kept.
+   * - The kept key was built from `state` or from a state before it on the same chain. Every kept key is forgotten
+   *   ({@link #forgetZswapKeys}) when the engine abandons a state it may have built one from: the pending state
+   *   dropped ({@link #dropPending}), the committed state replaced by one read from the database ({@link load}), a
+   *   settle that failed ({@link #settled}). So each kept key was built from the newest state the engine holds (the
+   *   pending one, else the committed one) or from one before it, and a block is applied only on the committed state,
+   *   once a pending state for another block is dropped.
+   * - On one chain, an equal first free index and root are the same tree for the package's filter, which keeps a leaf
+   *   by the contract address stored beside it. The root does not cover that address (it is computed from the leaves'
+   *   hashes only), but the tree only grows, one leaf with its address at the first free index, so two states of one
+   *   chain with the same first free index hold the same leaves with the same addresses. The root is a further check.
+   */
+  #zswapKey(adapter: LedgerPackage, state: StateHandle, address: Uint8Array, summary: StateSummary, held: boolean): Uint8Array | null {
+    const contract = hexOf(address);
+    const root = hexOf(summary.zswapRoot);
+    const kept = this.#zswapKeys.get(contract);
+    // Taken out, and put back last if it is used: the map's order is the least recently used first.
+    this.#zswapKeys.delete(contract);
+    if (held && kept !== undefined && kept.adapter === adapter && kept.firstFree === summary.zswapFirstFree && kept.root === root) {
+      this.#zswapKeys.set(contract, kept);
+      return kept.key;
+    }
+    const key = adapter.contractZswapStateKey(state, address);
+    if (key !== null) {
+      this.#zswapKeys.set(contract, { adapter, firstFree: summary.zswapFirstFree, root, key });
+      // One key added, so at most one over the bound: the least recently used goes (the one added, at a bound of 0).
+      if (this.#zswapKeys.size > this.#zswapKeysKept) this.#zswapKeys.delete(this.#zswapKeys.keys().next().value as string);
+    }
+    return key;
+  }
+
+  /** Forgets every kept zswap state key ({@link #zswapKey}): the engine abandons a state it may have built one from. */
+  #forgetZswapKeys(): void {
+    this.#zswapKeys.clear();
+  }
+
+  /**
    * Installs the node store in `adapter`'s package, once (see the module comment): the package's own `loadState` is
    * the one way to, so the state whose root key it was just given is loaded — from memory, where it still is — and
    * dropped.
@@ -470,11 +556,12 @@ export class LedgerEngine {
     this.#installed.add(adapter);
   }
 
-  /** Drops the pending state, if any. */
+  /** Drops the pending state, if any, and with it every kept zswap state key ({@link #zswapKey}). */
   #dropPending(): void {
     if (this.#pending === null) return;
     this.#pending.adapter.dispose(this.#pending.state);
     this.#pending = null;
+    this.#forgetZswapKeys();
   }
 
   /** Records `settled` as the pending state after `block`. */
@@ -658,6 +745,8 @@ export class LedgerEngine {
     const state = adapter.load(input.stateKey, store);
     this.#installed.add(adapter);
     this.#dropPending();
+    // The committed state is replaced: no zswap state key built from the states before may outlive them.
+    this.#forgetZswapKeys();
     if (this.#committed !== null) this.#committed.adapter.dispose(this.#committed.state);
     const root = adapter.stateRoot(state);
     this.#committed = { ...idOf(input), ledger: input.ledger, adapter, state, key: input.stateKey, root };

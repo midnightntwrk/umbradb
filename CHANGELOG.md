@@ -290,6 +290,12 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   prepared when a schema change the process made was counted (a migration, a writer's rollback); and on a session
   where an execution of it by name failed. While a marked statement's execution by name has no answer, its session
   sends nothing else: a statement asked for meanwhile is sent after that answer.
+- **A contract's zswap state key is built only when the zswap tree changed.** The ledger worker keeps, per contract,
+  the key it built and the tree (first free index and root) it built it from, and asks the package again only for
+  another tree, another package, or a state that does not hold the contract; the key is still persisted in every
+  block that touches the contract, so a block writes the same. The kept keys are forgotten whenever the worker drops
+  a state it applied or held (a pending block replaced by another, a state loaded in place of the one it holds, an
+  apply that failed), and at most 16,384 are kept, about 8 MB, the least recently used dropped first.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
