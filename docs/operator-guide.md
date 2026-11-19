@@ -339,7 +339,7 @@ coreEntry({ start: 0, config: { /* … */ fastSync: { blocks: 100, distance: 600
 
 | Member | Default | |
 |---|---|---|
-| `blocks` | `0` | The most heights in one chunk, 0 to 1,000. Below 2 the mode is off. |
+| `blocks` | `0` | The most heights in one chunk, 0 to 1,000. Below 2 the mode is off. Measured, 100 is as fast as the mode off and 1,000 is slower (below). |
 | `distance` | `600` | A chunk holds only heights at least this far behind the finalized head the loop read for its pass: about an hour of chain at the default. The heights nearer the head are stored one block per transaction. |
 
 **When a chunk forms, and where it ends.** At each height the loop asks whether a chunk starts there. It ends at the
@@ -350,6 +350,23 @@ private process, and a public process with `lockstepInstances`, never form chunk
 `COMMIT`, before its next block when the process is asked to stop or to pause (`pause()`, a backup on SIGUSR2), and
 before a block whose computation needs the block before committed (the ledger's v8 → v9 conversion).
 
+**What it gains, measured.** By itself the mode does not make a sync faster. On Preprod (four ranges of 1,500
+heights, PostgreSQL 18) chunks of 100 ran at 0.98 to 1.03 times the mode off's heights per second, and chunks of 1,000
+at 0.93 and 0.85. A chunk saves about 10 statements per block (one `BEGIN` and one `COMMIT` per chunk, no read-only
+transaction per block; one statement per block comes back for the check between blocks) and costs 0.5 to 1.7 ms per
+block more in the write of the ledger's node counts. That write slows with a block's place in its chunk: 1.1 times the
+mode off's at places 1 to 100, 2.5 times at places 901 to 1,000. Keep `blocks` at 100 or below: above it the mode is
+slower than off until the counts are written once per chunk, which this version does not do. A block of a chunk of
+100 is committed 0.7 to 1.9 s after it was written, and one of a chunk of 1,000 5 to 12 s; with 1,000 the process
+used 62 to 160 MiB more memory.
+
+**What a module's schema can cost.** Between two blocks of a chunk the engine checks the deferred constraints and
+fires the deferred triggers, as each block's own `COMMIT` does with the mode off, so a block that the mode off refuses
+is refused in a chunk too. Three things it cannot give the next block as a new transaction would, and a chunk then
+ends at every block: a constraint declared `DEFERRABLE INITIALLY IMMEDIATE`, a temporary table or sequence in the
+writer's session, and a cursor a block left open. While one of them is there the heights are stored one per
+transaction, and the engine asks again once per `blocks` heights. UmbraDB's own schema has none of the three.
+
 **What changes for an operator.**
 - The cursor, `/status` and the module API move a chunk at a time: a chunk's blocks are committed together, and on
   PostgreSQL other readers see the last committed height meanwhile, up to `blocks` heights behind what is written.
@@ -357,6 +374,10 @@ before a block whose computation needs the block before committed (the ledger's 
   `COMMIT`: for as long as the rest of the chunk takes, with no time limit. PGlite is a development backend.
 - A crash, a kill or a lost connection loses the open chunk's work: the process starts again from the cursor before
   the chunk.
+- A stop or a pause asked while a chunk is open ends it before its next block: the blocks written are committed. An
+  open chunk never waits for the node: the blocks and the ledger state roots of a chunk are fetched before its
+  transaction opens. A stop asked while the process waits for them (a node that does not answer) ends the wait at
+  once; the chunk's first block, if it was already computed, is stored before the process stops.
 - A failure inside a chunk is handled as the mode off handles it at the same block: the blocks below the failing one
   are committed where the transaction allows, and stored again one block per transaction where it rolled back (the
   ledger worker's thread is then restarted, and the next blocks load the state from the database). A failure that is
@@ -364,15 +385,21 @@ before a block whose computation needs the block before committed (the ledger's 
   `on-after-db-write` halts with the cursor at the chunk's last block, not at that block; a ledger worker that traps
   in a block's writes leaves the cursor at the chunk's first block − 1, since the blocks stored again fail at the
   first (a trap is retried in neither mode); and a finality conflict the node reports while a chunk is open halts once
-  it committed, up to `blocks` heights later.
+  it committed, at the height above the chunk, at most `blocks` heights later.
+- A block whose fetch or parse failed while it was taken for a chunk fails when processing reaches it, not before: the
+  blocks below it are stored first, and the log names its height. If one of those blocks halts first, the log says
+  that the failure kept for the block above was dropped.
 - Memory grows with `blocks`: a chunk keeps every block's items, the ledger worker's parses and the trace's lines until
   its `COMMIT`.
-- A chunk takes all its blocks from the node before its transaction opens. With `prefetchWindow` below `blocks`, each
-  chunk waits for the heights above the window (its first line's `beginMs`); `prefetchWindow` at least `blocks` + 1
-  avoids it.
+- A chunk takes all its blocks from the node before its transaction opens, and then waits for the ledger state roots
+  of its later blocks. With `prefetchWindow` below `blocks`, each chunk waits for the heights above the window (its
+  first line's `beginMs`; the roots' wait is in its `prepareMs`); `prefetchWindow` at least `blocks` + 1 avoids it.
+- Each block of a chunk but its last costs one more statement, a read of about 0.2 ms: the check between two blocks.
+  A database with a deferrable constraint gets a text of two statements with it, sent together with the read.
 
 What is stored at every height is what the mode off stores, row for row, for the same history of ledger worker
-restarts.
+restarts, as long as no module's writes depend on what belongs to the transaction rather than to the block: a setting
+made with `SET LOCAL`, `now()`, the transaction id, a sequence's value (the module guide, §12).
 
 ## Measuring a sync: the block trace
 
