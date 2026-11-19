@@ -3,13 +3,13 @@
  * `fields`), by name ({@link STATEMENTS}): the catalog
  * `test/features/token-metadata/sql-plans.test.ts` plans on both backends (no scan of a `token_metadata` table, every
  * index used). Each is static: a variant is its own statement. The functions below only bind and map. An answer reads
- * in a fixed number of statements, plus one for each symbol group it shows (its members), and plus one for each served
- * 12-character symbol (see {@link symbolGroup}).
+ * in three statements (its tokens, their fields, the counts of their symbols), plus one for each symbol group it shows
+ * (its members), and plus one for each served 12-character symbol (see {@link symbolGroup}).
  */
 
 import type { ReadHandle } from "../../db/api.js";
 import { TOKEN_METADATA_SCHEMA } from "../token-metadata/schema.js";
-import { COMMON_KEY_HEX, type Field, firstCharacters, IMAGE_KEY_HEX, lengthLimited, symbolGroups } from "../token-metadata/rules.js";
+import { COMMON_KEY_HEX, type Field, firstCharacters, lengthLimited, symbolGroups } from "../token-metadata/rules.js";
 import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
 
 /** A token: its id (the hash of domain separator and contract), kind, contract and domain separator (hex, lowercase). */
@@ -58,18 +58,10 @@ export const STATEMENTS = Object.freeze({
   /** The tokens of (contract `$1`, domainSep `$2`) of kinds `$3`. */
   tokensOfDomain: `SELECT ${TOKEN_COLUMNS} FROM ${TOKEN_METADATA_SCHEMA}.tokens t
      WHERE t.contract_address = $1 AND t.domain_sep = $2 AND t.kind = ANY($3::smallint[]) ORDER BY t.kind`,
-  /** The first `$3` fields of each token, in key byte order. */
-  tokenFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS} CROSS JOIN LATERAL (
-       SELECT * FROM ${TOKEN_METADATA_SCHEMA}.fields WHERE token_id = i.id AND kind = i.k ORDER BY key LIMIT $3) f
+  /** Every field of each token, in key byte order: at most the six keys MIP-0018 defines (`fields`' primary key). */
+  tokenFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS}
+     JOIN ${TOKEN_METADATA_SCHEMA}.fields f ON f.token_id = i.id AND f.kind = i.k
      ORDER BY f.token_id, f.kind, f.key`,
-  /** How many fields each token has. */
-  tokenFieldCounts: `SELECT i.id, i.k AS kind,
-       (SELECT count(*) FROM ${TOKEN_METADATA_SCHEMA}.fields WHERE token_id = i.id AND kind = i.k)::int AS n
-     FROM ${BY_IDS}`,
-  /** The common fields (keys `$3`) of each token, in the order they were last set. */
-  commonFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS}
-     JOIN ${TOKEN_METADATA_SCHEMA}.fields f ON f.token_id = i.id AND f.kind = i.k AND f.key = ANY($3::bytea[])
-     ORDER BY f.token_id, f.kind, f.set_height, f.set_tx, f.set_event, f.set_record`,
   /** How many tokens have each (contract `$1[i]`, whole usable symbol `$2[i]`), for every pair at once (`tokens_symbol_idx`). */
   groupCounts: `SELECT p.address, p.symbol,
        (SELECT count(*) FROM ${TOKEN_METADATA_SCHEMA}.tokens t WHERE t.contract_address = p.address AND t.symbol = p.symbol)::int AS n
@@ -124,21 +116,15 @@ export async function tokensOfDomain(read: ReadHandle, contract: string, domainS
 
 // ── A token's fields ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The fields of each token, the first `limit` in key byte order, and how many it has: two statements. */
-export async function tokenFields(read: ReadHandle, keys: readonly TokenKey[], limit: number): Promise<Map<string, { fields: Field[]; count: number }>> {
-  const out = new Map(keys.map((k) => [tokenMapKey(k), { fields: [] as Field[], count: 0 }]));
-  if (keys.length === 0) return out;
-  for (const r of await read.query(STATEMENTS.tokenFields, [...idsParams(keys), limit])) out.get(fieldKeyOf(r))!.fields.push(fieldOf(r));
-  for (const r of await read.query(STATEMENTS.tokenFieldCounts, idsParams(keys))) out.get(fieldKeyOf(r))!.count = num(r.n);
-  return out;
-}
-
-/** The common fields of each token, in the order they were last set: one statement. */
-export async function commonFields(read: ReadHandle, keys: readonly TokenKey[]): Promise<Map<string, Map<string, Field>>> {
+/**
+ * Every field of each token, by its key (hex), in key byte order: one statement for all of them. A token has at most
+ * the six keys MIP-0018 defines (the indexer stores no other), so this is the whole token: what is served as its
+ * fields, and what its common fields and its symbol are read from.
+ */
+export async function tokenFields(read: ReadHandle, keys: readonly TokenKey[]): Promise<Map<string, Map<string, Field>>> {
   const out = new Map(keys.map((k) => [tokenMapKey(k), new Map<string, Field>()]));
   if (keys.length === 0) return out;
-  const common = [...Object.values(COMMON_KEY_HEX), ...Object.values(IMAGE_KEY_HEX)].map(bytes);
-  for (const r of await read.query(STATEMENTS.commonFields, [...idsParams(keys), common])) out.get(fieldKeyOf(r))!.set(toHex(r.key as Uint8Array), fieldOf(r));
+  for (const r of await read.query(STATEMENTS.tokenFields, idsParams(keys))) out.get(fieldKeyOf(r))!.set(toHex(r.key as Uint8Array), fieldOf(r));
   return out;
 }
 

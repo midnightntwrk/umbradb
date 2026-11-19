@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MAX_TOKEN_FIELDS } from "../../../src/features/token-metadata-api/schemas.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import type { ReadHandle } from "../../../src/db/api.js";
@@ -8,10 +7,10 @@ import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, r
 
 /**
  * Bounded cost of the API, on PostgreSQL 18 and PGlite. Large cardinalities are written straight into the
- * indexer's tables of a stopped database — a token with 10,000 fields, 10,000 rejected events of its contract (which
- * no answer reads), and 1,000 tokens of that contract sharing its symbol — then the route's handler answers through a read handle that counts the
- * rows each answer reads back. Every answer is small: the first {@link MAX_TOKEN_FIELDS} fields with `fieldCount` and
- * `fieldsTruncated`, the first 100 members with their count, a contract a page at a time, a
+ * indexer's tables of a stopped database — 10,000 rejected events of a contract (which no answer reads) and 1,000
+ * tokens of that contract sharing its symbol — then the route's handler answers through a read handle that counts the
+ * rows each answer reads back. Every answer is small: a token's own fields, the first 100 members of its group with
+ * their count, a contract a page at a time, a
  * hundred colors in a fixed number of statements, and a page of tokens with different symbols in the same number of
  * statements whatever its size; none reads back more than {@link MAX_ROWS} rows. **Negative control:**
  * the same group under a 12-character symbol, which may be the cut of longer ones, reads every row sharing it, and the
@@ -38,18 +37,13 @@ const ID_SQL = (domainSep: string, contract: string) =>
   `sha256('\\x6d69646e696768743a6465726976655f746f6b656e0000000000000000000000'::bytea || ${domainSep} || ${contract})`;
 
 /**
- * Seeds the hostile cardinalities, the group's members with `symbol`: 10,000 fields on one token (only the six keys
- * MIP-0018 defines are ever stored, so this many stand for what a later standard's keys could bring), 999 more tokens
- * of the contract with the symbol, and 10,000 rejected events of the contract.
+ * Seeds the hostile cardinalities, the group's members with `symbol`: 999 more tokens of the contract with the
+ * symbol, and 10,000 rejected events of the contract. A token's own fields cannot be many: the indexer stores at most
+ * the six keys MIP-0018 defines.
  */
 async function seed(db: ProcessDatabase, symbol: string): Promise<void> {
   const x = `'\\x${raw(X)}'::bytea`;
   const id = `'\\x${raw(tokenColor(DA, X))}'::bytea`;
-  await db.query(
-    `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
-     SELECT ${id}, 3, convert_to('k' || lpad(i::text, 6, '0'), 'UTF8'), 1, '\\x76'::bytea, NULL, NULL, ${S + 1}, 0, 0, i
-     FROM generate_series(1, ${N}) AS i`,
-  );
   await db.query(`UPDATE token_metadata.fields SET value = convert_to('${symbol}', 'UTF8') WHERE token_id = ${id} AND key = convert_to('symbol', 'UTF8')`);
   await db.query(`UPDATE token_metadata.tokens SET symbol = convert_to('${symbol}', 'UTF8') WHERE id = ${id}`);
   await db.query(
@@ -124,11 +118,11 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
   }, 300_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("a token: its first 256 fields with fieldCount, its common fields, a group of 100 members", async () => {
+  it("a token: its fields, its common fields, a group of 100 members", async () => {
     const got = await tokens(db, { contract: hex(X), domainSep: hex(DA), kind: 3 });
     expect(got.status).toBe(200);
     const [token] = got.json.items;
-    expect([token.fields.length, token.fieldCount, token.fieldsTruncated]).toEqual([MAX_TOKEN_FIELDS, N + 3, true]);
+    expect(token.fields.map((f: Json) => f.key.utf8)).toEqual(["decimals", "name", "symbol"]);
     expect(token.fields.every((f: Json, i: number) => i === 0 || f.key.hex > token.fields[i - 1].key.hex)).toBe(true);
     expect(token.common).toEqual({ name: "Big", symbol: "SPAM", decimals: "6", standards: null, image: null, imageSha256: null });
     expect([token.group.memberCount, token.group.members.length]).toEqual([MEMBERS, 100]);
@@ -141,7 +135,7 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
     expect(got.json.items).toHaveLength(10);
     expect(typeof got.json.nextCursor).toBe("string");
     expect(got.json.items.every((t: Json) => t.group.memberCount === MEMBERS)).toBe(true);
-    // One of the ten carries the full 256 fields (about 160 KB of the page); the other nine one field each.
+    // Each of the ten carries its own few fields and the first 100 members of the group they share.
     expect(got.size).toBeLessThan(200_000);
     expect(got.rows).toBeLessThan(MAX_ROWS);
   }, 120_000);

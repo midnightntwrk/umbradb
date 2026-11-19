@@ -1,20 +1,20 @@
 /**
  * The route `getTokens` (`POST /token-metadata-api/v1/tokens`): the tokens an input selects (`./schemas.ts`,
- * {@link TokensRequest}), each with every defined field up to {@link MAX_TOKEN_FIELDS}, its common fields and its
+ * {@link TokensRequest}), each with its fields (at most the six keys MIP-0018 defines), its common fields and its
  * symbol group. Bytes leave as `0x` lowercase hex ({@link hex0x}) and wide integers as `bigint`s, which the
  * output schema writes as digits in a string.
  *
  * A token is a described identity: one with at least one defined field (MIP "Applying records"); a withdrawn one is
  * referenced nowhere. Reads are bounded whatever the request selects: the selection is one statement, then a token's
- * fields, common fields and the counts of its symbols take two, one and one statements for all the selected tokens
- * together; a group that exists (two or more tokens share the symbol) takes one more for its members. Nothing here fetches anything.
+ * fields and the counts of its symbols take one statement each for all the selected tokens together (the common
+ * fields are read from the same rows); a group that exists (two or more tokens share the symbol) takes one more for its members. Nothing here fetches anything.
  */
 
 import type { ReadHandle } from "../../db/api.js";
 import { COMMON_KEY_HEX, type Field as StateField, IMAGE_KEY_HEX, parseStandards } from "../token-metadata/rules.js";
 import { decodeUtf8, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
-import { commonFields, groupCounts, groupKey, isWholeSymbol, tokenMapKey, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
+import { groupCounts, groupKey, isWholeSymbol, tokenMapKey, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { pageCursor } from "../../helpers/page-cursor.js";
 import { invalidRequest } from "../../modules/route.js";
 import {
@@ -26,7 +26,6 @@ import {
   type Kind,
   type KindName,
   MAX_GROUP_MEMBERS,
-  MAX_TOKEN_FIELDS,
   type TokenJson,
   type TokensRequest,
   type TokensResponse,
@@ -86,19 +85,18 @@ export function commonJson(fields: ReadonlyMap<string, StateField>): Common {
 
 /** The full answer object of each token in `keys`, in that order. */
 async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<TokenJson[]> {
-  const fields = await tokenFields(read, keys, MAX_TOKEN_FIELDS);
-  const commons = await commonFields(read, keys);
+  const fields = await tokenFields(read, keys);
   // One count for every whole symbol of the page: only a symbol that two or more tokens share is read further.
   const symbols = keys.flatMap((k) => {
-    const symbol = commons.get(tokenMapKey(k))!.get(COMMON_KEY_HEX.symbol);
+    const symbol = fields.get(tokenMapKey(k))!.get(COMMON_KEY_HEX.symbol);
     return symbol !== undefined && symbol.usable === true && isWholeSymbol(symbol.value) ? [{ contract: k.contractAddress, symbol: symbol.value }] : [];
   });
   const counts = await groupCounts(read, symbols);
   const groups = new Map<string, Group | null>();
   const out: TokenJson[] = [];
   for (const k of keys) {
-    const common = commons.get(tokenMapKey(k))!;
-    const symbol = common.get(COMMON_KEY_HEX.symbol);
+    const own = fields.get(tokenMapKey(k))!;
+    const symbol = own.get(COMMON_KEY_HEX.symbol);
     let group: Group | null = null;
     if (symbol !== undefined && symbol.usable === true) {
       const at = groupKey(k.contractAddress, symbol.value);
@@ -113,17 +111,14 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
       }
       group = groups.get(at) ?? null;
     }
-    const own = fields.get(tokenMapKey(k))!;
     out.push({
       contractAddress: `0x${k.contractAddress}`,
       domainSep: `0x${k.domainSep}`,
       kind: k.kind as Kind,
       kindName: KIND_NAMES[k.kind]!,
       color: hasColor(k.kind) ? `0x${k.id}` : null,
-      common: commonJson(common),
-      fields: own.fields.map(fieldJson),
-      fieldCount: own.count,
-      fieldsTruncated: own.count > own.fields.length,
+      common: commonJson(own),
+      fields: [...own.values()].map(fieldJson),
       group,
     });
   }

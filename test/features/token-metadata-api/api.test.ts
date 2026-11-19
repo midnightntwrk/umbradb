@@ -98,8 +98,6 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       kindName: "shielded-utxo",
       color: colorOf(A, D7),
       common: { name: "Acme Gold", symbol: "AG", decimals: "6", standards: null, image: IMAGE, imageSha256: null },
-      fieldCount: 4,
-      fieldsTruncated: false,
       group: { symbol: { hex: hex(new TextEncoder().encode("AG")), utf8: "AG" }, memberCount: 2, members: [{ domainSep: hex(D7), kind: 1 }, { domainSep: hex(D8), kind: 1 }] },
     });
     expect("image" in token).toBe(false);

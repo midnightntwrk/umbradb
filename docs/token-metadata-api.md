@@ -47,7 +47,7 @@ withdrawn) is in no answer: an empty `items` is a valid answer.
   "color": "0xbf1b…",
   "common": { "name": "Acme Gold", "symbol": "AGLD", "decimals": "6", "standards": null,
               "image": "https://example.com/agld.png", "imageSha256": "0xab12…" },
-  "fields": [ Field, … ], "fieldCount": 5, "fieldsTruncated": false,
+  "fields": [ Field, … ],
   "group": { "symbol": { "hex": "0x41474c44", "utf8": "AGLD" }, "memberCount": 2, "members": [ { "domainSep": "0x0101…", "kind": 1 }, … ] }
 }
 ```
@@ -57,8 +57,7 @@ withdrawn) is in no answer: an empty `items` is a valid answer.
 - `common`: MIP-0018's six common fields, usable values only; one never set or unusable is `null`, with no default.
   `image` is the URI the contract published and `imageSha256` the hash it published for the file there. The module
   fetches nothing and checks nothing: a client that shows the image fetches it and compares its SHA-256 itself.
-- `fields`: every defined field, in key byte order, up to 256; `fieldCount` counts them all, and `fieldsTruncated`
-  is true when there are more than 256.
+- `fields`: every field the token has, in key byte order: at most the six keys MIP-0018 defines.
 - `group`: the tokens of the same contract whose served `symbol` is the same, when there are two or more (up to 100
   members listed, `memberCount` counts them all); else `null`.
 
@@ -83,7 +82,7 @@ set: `height` is a decimal string, and `eventIndex` is the event's position amon
 | Lengths | `name` and `symbol` are served as their first 64 and 12 characters (grapheme clusters, UAX #29); they are stored whole. |
 | No verdict | An answer gives a token's fields and says nothing about them: a client decides what a missing or unusable field means. A rejected event of the token's contract changes nothing in the answer. |
 | Hostile text | The body is pure ASCII: every non-ASCII character and `<`, `>`, `&` are `\uXXXX` escapes; parsing gives the exact text back. |
-| Bounded cost | Each answer reads through the indexer's indexes in a fixed number of statements, whatever the page's size: its tokens, their fields, and one count of all the page's symbols. A symbol that two or more tokens share takes one more read, for its members. One accepted exception: the group of a served 12-character symbol reads every symbol of its contract starting with it (`apiReadTimeoutMs` bounds the request). |
+| Bounded cost | Each answer reads through the indexer's indexes in three statements, whatever the page's size: its tokens, their fields, and one count of all the page's symbols. A symbol that two or more tokens share takes one more read, for its members. One accepted exception: the group of a served 12-character symbol reads every symbol of its contract starting with it (`apiReadTimeoutMs` bounds the request). |
 
 ## Errors
 

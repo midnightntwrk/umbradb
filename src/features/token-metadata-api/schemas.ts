@@ -20,8 +20,6 @@ export const MAX_COLORS = 100;
 /** A page of a contract's tokens: at most this many, `DEFAULT_LIMIT` unless the request says. */
 export const MAX_LIMIT = 500;
 export const DEFAULT_LIMIT = 100;
-/** The most defined fields served per token, in key byte order; `fieldsTruncated` says when a token has more. */
-export const MAX_TOKEN_FIELDS = 256;
 /** The most members listed in a symbol group (all are counted in `memberCount`). */
 export const MAX_GROUP_MEMBERS = 100;
 
@@ -103,7 +101,7 @@ export type Group = z.output<typeof Group>;
 export const KindName = z.enum(["shielded-utxo", "unshielded-utxo", "contract-token"]);
 export type KindName = z.output<typeof KindName>;
 
-/** A token with every defined field (up to {@link MAX_TOKEN_FIELDS}), its common fields and its group. */
+/** A token with its fields (at most the six keys MIP-0018 defines, in key byte order), its common fields and its group. */
 export const TokenJson = z.strictObject({
   contractAddress: hash32(),
   domainSep: hash32(),
@@ -111,9 +109,7 @@ export const TokenJson = z.strictObject({
   kindName: KindName,
   color: hash32().nullable(),
   common: Common,
-  fields: z.array(Field),
-  fieldCount: z.int().min(1),
-  fieldsTruncated: z.boolean(),
+  fields: z.array(Field).min(1),
   group: Group.nullable(),
 });
 export type TokenJson = z.output<typeof TokenJson>;
