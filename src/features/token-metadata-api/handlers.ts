@@ -21,12 +21,12 @@ import {
   type Common,
   AllCursor,
   ContractCursor,
+  DEFAULT_LIMIT,
   type Field,
   type Group,
   type Kind,
   type KindName,
   MAX_GROUP_MEMBERS,
-  MAX_LIMIT,
   type TokenJson,
   type TokensRequest,
   type TokensResponse,
@@ -155,7 +155,7 @@ export async function selectTokens(body: TokensRequest, read: ReadHandle): Promi
     const keys = await tokensOfDomain(read, body.contract, body.domainSep, "kind" in body ? body.kind : undefined);
     return { items: await tokensOf(read, keys), nextCursor: null };
   }
-  const limit = body.limit ?? MAX_LIMIT;
+  const limit = body.limit ?? DEFAULT_LIMIT;
   if (!("contract" in body)) {
     const after = body.cursor === undefined ? undefined : allCursors.decode(body.cursor).a;
     const keys = await tokensAfter(read, limit + 1, after);

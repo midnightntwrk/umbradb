@@ -155,7 +155,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     expect(perContract.sort()).toEqual(keys);
     expect(new Set(all.json.items.map((t: { contractAddress: string }) => t.contractAddress)).size).toBeGreaterThan(1);
     expect(keys.some((key) => key.startsWith(hex(W)))).toBe(false);
-    for (const limit of [1, 2, 500]) {
+    for (const limit of [1, 2, 100]) {
       const paged: unknown[] = [];
       let cursor: string | undefined;
       do {
@@ -218,13 +218,13 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       { domainSep: hex(D7) },
       { kind: 1 },
       { limit: 0 },
-      { limit: 501 },
+      { limit: 101 },
       { cursor: "not a cursor!" },
       { contract: hex(A), kind: 1 },
       { contract: hex(A), domainSep: hex(D7), kind: 4 },
       { contract: hex(A), domainSep: hex(D7), kind: "one" },
       { contract: hex(A), limit: 0 },
-      { contract: hex(A), limit: 501 },
+      { contract: hex(A), limit: 101 },
       { contract: hex(A), limit: 1.5 },
       { contract: hex(A), cursor: "not a cursor!" },
       { contract: hex(A), cursor: Buffer.from(JSON.stringify({ c: hex(A), k: ["x", 1] })).toString("base64url") },

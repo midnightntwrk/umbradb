@@ -17,8 +17,9 @@ import { UINT_MAX_BYTES } from "../token-metadata/codec/index.js";
 
 /** The most colors one request may carry. */
 export const MAX_COLORS = 100;
-/** A page of tokens: this many unless the request's `limit` asks for fewer. */
-export const MAX_LIMIT = 500;
+/** A page of tokens: `DEFAULT_LIMIT` unless the request's `limit` says, and never more than `MAX_LIMIT`. */
+export const DEFAULT_LIMIT = 20;
+export const MAX_LIMIT = 100;
 /** The most members listed in a symbol group (all are counted in `memberCount`). */
 export const MAX_GROUP_MEMBERS = 100;
 
@@ -58,7 +59,7 @@ const COLOR_LIST = /^0x[0-9a-f]{64}(,0x[0-9a-f]{64})*$/;
  * The input: the route is a `GET`, so its input is its parameters, each one text or a number. Together they are
  * exactly one of five selectors, which is what the handler takes ({@link TokensSelector}):
  * - no parameter, or `limit` and `cursor` alone: every described token, by (contract, domainSep, kind), a page at a
- *   time. A page holds {@link MAX_LIMIT} tokens unless `limit` asks for fewer.
+ *   time. A page holds {@link DEFAULT_LIMIT} tokens unless `limit` says, up to {@link MAX_LIMIT}.
  * - `colors`: the described kind 1 and 2 tokens of each color (a color covers both kinds). One parameter, the colors
  *   separated by commas, up to {@link MAX_COLORS}; given alone.
  * - `contract`, with `limit` and `cursor` or neither: a contract's described tokens, a page at a time.

@@ -142,27 +142,30 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
 
   it("a page of tokens with different symbols takes the same number of statements whatever its size", async () => {
     const small = await tokens(db, { contract: hex(Y), limit: 10 });
-    const large = await tokens(db, { contract: hex(Y), limit: DISTINCT });
-    expect([small.json.items.length, large.json.items.length]).toEqual([10, DISTINCT]);
+    const large = await tokens(db, { contract: hex(Y), limit: 100 });
+    expect([small.json.items.length, large.json.items.length]).toEqual([10, 100]);
     expect(large.json.items.every((t: Json) => t.group === null && t.common.symbol.startsWith("S"))).toBe(true);
-    // One count for all the page's symbols: thirty times the tokens, not one statement more.
+    // One count for all the page's symbols: ten times the tokens, not one statement more.
     expect(large.statements).toBe(small.statements);
     expect(large.statements).toBeLessThanOrEqual(8);
   }, 120_000);
 
-  it("with no parameter: a page of every contract's tokens holds 500, in a fixed number of statements, and the next continues it", async () => {
+  it("with no parameter: a page of every contract's tokens holds 20, the largest 100, in a fixed number of statements; the next continues it", async () => {
     const first = await tokens(db, {});
-    expect([first.status, first.json.items.length, typeof first.json.nextCursor]).toEqual([200, 500, "string"]);
+    expect([first.status, first.json.items.length, typeof first.json.nextCursor]).toEqual([200, 20, "string"]);
+    const largest = await tokens(db, { limit: 100 });
+    expect([largest.json.items.length, typeof largest.json.nextCursor]).toEqual([100, "string"]);
+    expect(largest.json.items.slice(0, 20)).toEqual(first.json.items);
+    expect((await tokens(db, { limit: 101 })).status).toBe(400);
     // The members of a group are read once for the page, whatever the number of its tokens that carry them.
-    expect(first.statements).toBeLessThanOrEqual(8);
-    expect(first.rows).toBeLessThan(5_000);
-    // The worst page: 500 tokens that each carry the first 100 members of one group. About 4.9 MB.
-    expect(first.size).toBeLessThan(6_000_000);
-    const few = await tokens(db, { limit: 10 });
-    expect(few.json.items).toEqual(first.json.items.slice(0, 10));
+    expect(largest.statements).toBe(first.statements);
+    expect(largest.statements).toBeLessThanOrEqual(8);
+    expect(largest.rows).toBeLessThan(MAX_ROWS);
+    // The worst pages: tokens that each carry the first 100 members of one group. About 0.2 MB by default, 1 MB at most.
+    expect(first.size).toBeLessThan(250_000);
+    expect(largest.size).toBeLessThan(1_200_000);
     const second = await tokens(db, { cursor: first.json.nextCursor });
-    expect(second.json.items.length).toBe(500);
-    expect(second.json.items[0]).not.toEqual(first.json.items[499]);
+    expect(second.json.items).toEqual(largest.json.items.slice(20, 40));
   }, 120_000);
 
   it("[NEG] a group under a 12-character symbol reads every row sharing it, and the bound sees it", async () => {

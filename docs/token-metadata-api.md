@@ -23,9 +23,9 @@ digits. A request has no body.
 
 | Selector | Parameters | Answers |
 |---|---|---|
-| Every token | no parameter, or `limit=<1–500>` and `cursor=<string>` alone | every described token, by (contract, domainSep, kind), 500 a page unless `limit` asks for fewer |
+| Every token | no parameter, or `limit=<1–100>` and `cursor=<string>` alone | every described token, by (contract, domainSep, kind), 20 a page unless `limit` says |
 | Colors | `colors=<color>,<color>,…`: 1 to 100 colors in one parameter, separated by commas; given alone | the described kind 1 and 2 tokens of each color (one color covers a token's shielded and unshielded kinds) |
-| Contract | `contract=<address>`, and optionally `limit=<1–500>` and `cursor=<string>` | the contract's described tokens by (domainSep, kind), 500 a page unless `limit` asks for fewer |
+| Contract | `contract=<address>`, and optionally `limit=<1–100>` and `cursor=<string>` | the contract's described tokens by (domainSep, kind), 20 a page unless `limit` says |
 | Contract and domain separator | `contract=<address>&domainSep=<hex>` | that token's described kinds |
 | One token | `contract=<address>&domainSep=<hex>&kind=<1, 2 or 3>` | that token, or none |
 
