@@ -177,19 +177,31 @@ export interface BlockContext {
   /** Whether the module with this id has an entry covering this height. */
   active: (moduleId: string) => boolean;
   /**
-   * Whether the block before this one was committed by this process with no failure between, and nothing else wrote
-   * the database since: true when its `COMMIT` answered in the same run of processing and the writer still has the
-   * session that committed it when this context is made (so it held the writer lock all along, and no other writer can
-   * have changed a row), so what a module kept in memory of it is what the database holds. False at a run's first
-   * height (a start, any retry), for a height processed again after a failure, for the height after one whose `COMMIT`
-   * lost its answer, at the re-delivery after a restart, from the first context made after the writer's session was
-   * replaced (on PostgreSQL, a connection lost while idle, also during the block's own callbacks), and always at
-   * `on-fetch` and `on-parse`, which may run before the block before committed. A block some of whose callbacks were
-   * told true and whose transaction then finds the writer's session replaced is not written: that attempt fails,
-   * retryable, and the block is made again with `continues` false. It may be false at any block: a module that keeps
-   * the block before in memory reads it from the database then.
+   * Whether the block before this one was stored by this process with no failure between, and nothing else wrote the
+   * database since, so what a module kept in memory of it is what the database holds for this block: true when it was
+   * stored in the same run of processing, its `COMMIT` answered or its rows written in the transaction this block is
+   * written in, and the writer still has the session that wrote it when this context is made (so it held the writer
+   * lock all along, and no other writer can have changed a row). False at a run's first height (a start, any retry),
+   * for a height processed again after a failure, for the height after one whose `COMMIT` lost its answer, at the first
+   * height after any rollback, at the re-delivery after a restart, from the first context made after the writer's
+   * session was replaced (on PostgreSQL, a connection lost while idle, also during the block's own callbacks), and
+   * always at `on-fetch` and `on-parse`, which may run before the block before was written. A block some of whose
+   * callbacks were told true and whose transaction then finds the writer's session replaced is not written: that
+   * attempt fails, retryable, and the block is made again with `continues` false. It may be false at any block: a
+   * module that keeps the block before in memory reads it from the database then.
    */
   continues: boolean;
+  /**
+   * Resolves once the block before this one is committed. Allowed at `on-compute` only, until the callback returns;
+   * anywhere else, or kept and called after the callback returned, it throws a programming error. It resolves at once
+   * when the block before is committed already. Otherwise the engine commits it first: what the callback read through
+   * its read until then stays read, the read it has open ends, and its statements after the call read the block before
+   * committed, at the same height. Every call for one block gets the same promise: a second call never resolves before
+   * the commit the first one asked for. A callback that reads a large part of the state the block before left (the
+   * ledger's conversion) calls it first, so that its reads see committed rows and no transaction holding other blocks
+   * stays open meanwhile.
+   */
+  blockBeforeCommitted(): Promise<void>;
 }
 
 /**

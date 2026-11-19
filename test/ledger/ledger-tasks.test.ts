@@ -258,6 +258,7 @@ describe("ledger tasks on the main thread", () => {
     settings: {},
     active: () => true,
     continues: false,
+    blockBeforeCommitted: async () => undefined,
   });
   const context = (): ProcessContext => ({ items: new Map(), revisions: [], publish() {} });
   const sink = () => {

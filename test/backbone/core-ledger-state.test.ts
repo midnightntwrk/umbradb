@@ -52,6 +52,7 @@ function block(height: bigint, items: Record<string, unknown> = {}): BlockContex
     settings: {},
     active: () => true,
     continues: false,
+    blockBeforeCommitted: async () => undefined,
   };
 }
 

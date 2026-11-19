@@ -328,6 +328,88 @@ stop when the core's configuration changes during it, or when `privateLink` and 
 start it again once both give one hash. A restored private backup holds the hash its process had accepted, so the
 restored process's first start compares it the same way.
 
+## Fast-sync mode: chunks of blocks in one transaction
+
+Far behind the finalized head, a public process can store a chunk of consecutive heights in one transaction instead
+of one transaction per block. It is off by default; the `core` entry's operational setting turns it on:
+
+```ts
+coreEntry({ start: 0, config: { /* … */ fastSync: { blocks: 100, distance: 600 } } })
+```
+
+| Member | Default | |
+|---|---|---|
+| `blocks` | `0` | The most heights in one chunk, 0 to 1,000. Below 2 the mode is off. Measured, 100 is as fast as the mode off and 1,000 is slower (below). |
+| `distance` | `600` | A chunk holds only heights at least this far behind the finalized head the loop read for its pass: about an hour of chain at the default. The heights nearer the head are stored one block per transaction. |
+
+**When a chunk forms, and where it ends.** At each height the loop asks whether a chunk starts there. It ends at the
+lowest of: `blocks` heights on; the head less `distance`; the end of the range of the configuration where no module
+starts or stops and no revision changes (the `core` entry's revisions included); the core's `stop` or the height before
+an upgrade boundary. A chunk holds two blocks or more; any other height is stored alone, as with the mode off. A
+private process, and a public process with `lockstepInstances`, never form chunks. A chunk also ends early, with its
+`COMMIT`, before its next block when the process is asked to stop or to pause (`pause()`, a backup on SIGUSR2), and
+before a block whose computation needs the block before committed (the ledger's v8 → v9 conversion). And chunks form
+only while the database has nothing that a `COMMIT` acts on (below).
+
+**What it gains, measured.** By itself the mode does not make a sync faster. On Preprod (four ranges of 1,500
+heights, PostgreSQL 18) chunks of 100 ran at 0.98 to 1.03 times the mode off's heights per second, and chunks of 1,000
+at 0.93 and 0.85. A chunk saves about 10 statements per block (one `BEGIN` and one `COMMIT` per chunk, no read-only
+transaction per block; one statement per block comes back, the read at each block's end, added after these runs) and
+costs 0.5 to 1.7 ms per block more in the write of the ledger's node counts. That write slows with a block's place in its chunk: 1.1 times the
+mode off's at places 1 to 100, 2.5 times at places 901 to 1,000. Keep `blocks` at 100 or below: above it the mode is
+slower than off until the counts are written once per chunk, which this version does not do. A block of a chunk of
+100 is committed 0.7 to 1.9 s after it was written, and one of a chunk of 1,000 5 to 12 s; with 1,000 the process
+used 62 to 160 MiB more memory.
+
+**What a module's schema can cost.** A chunk holds only blocks for which a `COMMIT` has nothing to do but make their
+writes durable. One read says so, at the end of each block: whether the database has a deferrable constraint (declared
+`INITIALLY DEFERRED` or `INITIALLY IMMEDIATE`), a constraint trigger, a temporary table or sequence in the writer's
+session, or an open cursor. While it finds one, no chunk forms: every height is stored in a transaction of its own, as
+with the mode off, with that one read more per block, and whatever a block leaves for its transaction's end (a
+deferred check, a deferred trigger, a cursor `WITH HOLD`) is done by that block's own `COMMIT`. A block that makes or
+leaves one of them inside a chunk ends the chunk there, with its `COMMIT`. Chunks form again once a block's end finds
+nothing. UmbraDB's own schema has none of them: only a module's schema or statements keep the mode from chunking, and
+the block trace then shows no `chunk` key.
+
+**What changes for an operator.**
+- The cursor, `/status` and the module API move a chunk at a time: a chunk's blocks are committed together, and on
+  PostgreSQL other readers see the last committed height meanwhile, up to `blocks` heights behind what is written.
+- On PGlite, which has one connection, a read of the module API or the admin endpoints waits for the open chunk's
+  `COMMIT`: for as long as the rest of the chunk takes, with no time limit. PGlite is a development backend.
+- A crash, a kill or a lost connection loses the open chunk's work: the process starts again from the cursor before
+  the chunk.
+- A stop or a pause asked while a chunk is open ends it before its next block: the blocks written are committed. An
+  open chunk never waits for the node: the blocks and the ledger state roots of a chunk are fetched before its
+  transaction opens. A stop or a pause asked while the process waits for them (a node that does not answer) ends the
+  wait: no block is taken after the one being fetched, the chunk's first block is stored alone, and the process then
+  stops or pauses. While a node does not answer and neither is asked, that first block stays computed and not yet
+  stored, where the mode off has stored it.
+- A failure inside a chunk is handled as the mode off handles it at the same block: the blocks below the failing one
+  are committed where the transaction allows, and stored again one block per transaction where it rolled back (the
+  ledger worker's thread is then restarted, and the next blocks load the state from the database). A failure that is
+  not retried halts at the same block as with the mode off, and the failing block's callbacks are not called a second
+  time. A chunk's `COMMIT` that the server answers with an error is its last block's failure: the blocks below it are
+  stored again, and the log names the last block with that error. For failures, three differences remain: a failure of a block's
+  `on-after-db-write` halts with the cursor at the chunk's last block, not at that block; a ledger worker that traps
+  in a block's writes leaves the cursor at the chunk's first block − 1, since the blocks stored again fail at the
+  first (a trap is retried in neither mode); and a finality conflict the node reports while a chunk is open halts once
+  it committed, at the height above the chunk, at most `blocks` heights later.
+- A block that failed while the blocks below it were not yet committed (its fetch or parse while it was taken for a
+  chunk, its computation, its writes) fails when processing reaches it, not before: the blocks below it are stored
+  first, also across a retry of one of them, and the log names its height. If one of those blocks halts first, the
+  log says that the failure kept for the block above was dropped.
+- Memory grows with `blocks`: a chunk keeps every block's items, the ledger worker's parses and the trace's lines until
+  its `COMMIT`.
+- A chunk takes all its blocks from the node before its transaction opens, and then waits for the ledger state roots
+  of its later blocks. With `prefetchWindow` below `blocks`, each chunk waits for the heights above the window (its
+  first line's `beginMs`; the roots' wait is in its `prepareMs`); `prefetchWindow` at least `blocks` + 1 avoids it.
+- Each block of a chunk costs one more statement, a read of about 0.17 ms on the tests' servers: the read at its
+  end. It is sent once more, in a transaction of its own, before a run's first chunk.
+
+What is stored at every height is what the mode off stores, row for row, for the same history of ledger worker
+restarts, as long as no module's writes depend on what belongs to the transaction rather than to the block: a setting
+made with `SET LOCAL`, `now()`, the transaction id, a sequence's value (the module guide, §12).
+
 ## Measuring a sync: the block trace
 
 `umbradb run` writes a block trace when its environment names a file for it:
@@ -356,7 +438,7 @@ command's end, the command fails with that error.
 
 | File | Holds |
 |---|---|
-| `<file>` | One JSON line per committed height: what the main thread's time went to. A height whose work after its commit (`on-after-db-write`) fails has none. A height that failed and was made again has the line of the run that committed it, and its reclamation is in `sh` once. A height whose `COMMIT` lost its answer has its line once the next run finds it committed (none if it did not commit); that line also holds what was sent until then, and no `txMs`. |
+| `<file>` | One JSON line per committed height: what the main thread's time went to. A chunk's lines are written once its `COMMIT` answered, in height order, each with its own block's work; a chunk that rolled back has none. A height whose work after its commit (`on-after-db-write`) fails has none. A height that failed and was made again has the line of the run that committed it, and its reclamation is in `sh` once. A height whose `COMMIT` lost its answer has its line once the next run finds it committed (none if it did not commit); that line also holds what was sent until then, and no `txMs`. |
 | `<file>.stmts.json` | One entry per statement text (`q`, its first 260 characters) the main thread sent on PostgreSQL: how many times it was sent (`n`, those that failed included), its client time from send to answer or failure in ms (`ms`) and its slowest call (`max`). The first 1,024 texts sent are kept by name; the statements of any other text are counted together in a last entry whose `q` is `(other statement texts)`, present once it counts one. On PGlite statements are not traced, so it is `[]`. |
 | `<file>.worker.jsonl` | One JSON line per block the ledger worker applied: what the worker thread's time went to since the line before. |
 
@@ -366,7 +448,8 @@ that height.
 | Key | What it is |
 |---|---|
 | `h`, `t` | The height, and the process's clock when it ended. |
-| `beginMs` | The wait for the block from its source, and the height's start. |
+| `beginMs` | The wait for the block from its source, and the height's start. In a chunk, on its first line only, and it holds the taking of every block of the chunk. |
+| `chunk` | `[first, last]`: the chunk of heights stored in one transaction this height belongs to (fast-sync mode), on every line of a chunk of two blocks or more. |
 | `prepareMs` | The points before the block's transaction (`on-fetch` to `on-compute`). It holds `applyMs` and `collectMs`. |
 | `applyMs`, `tx` | The block applied by the ledger worker, as the main thread waited for it, and the block's number of transactions. |
 | `rootWaitMs` | Of `applyMs`: the wait for the node's state root once the worker had answered. It is the node's time. |
@@ -380,9 +463,9 @@ that height.
 | `copyEmptied` | 1 when the height's settle did not start from what earlier heights left in that copy: its block did not continue the block before, as for `knownEmptied`, or, while it ran, an update of the copy would have taken it past its bound, `reclamationCache.keys`, which empties it before the key or list enters. |
 | `st` | The reclamation's sizes: new, rewritten and unchanged nodes, count changes, deleted nodes, rounds, keys queued, keys unqueued, and keys whose count stays above 0. |
 | `sh` | The chain of reclamation outputs: 16 hex digits of a SHA-256 over what every height so far gave, one link per run settled (its first and last heights, its net write, the keys evicted, the rounds). Two runs of the same heights whose last `sh` are equal computed the same reclamation at every height. A build that ran a reclamation step per block in `on-compute` chained other links, so its `sh` does not compare with this one's. |
-| `txMs` | The block's transaction, from its `BEGIN` to its `COMMIT` answered. |
+| `txMs` | The block's transaction, from its `BEGIN` to its `COMMIT` answered. In a chunk, the block's own part of it: its writes, the first block's with the `BEGIN`, the last one's with the `COMMIT`. |
 | `writeBlockMs`, `writeRefcountMs` | Inside it: the ledger state's own rows of the block (root counts, `states`, segment results, events) at `on-db-write`, and the reclamation's net write at `on-settle` (nodes, counts, queue, deleted rows). |
-| `commitMs` | The client time of the last `COMMIT` sent since the line before: the block's own, unless the process committed another write after it. |
+| `commitMs` | The client time of the last `COMMIT` sent since the line before: the block's own, unless the process committed another write after it. In a chunk, on its last line only (and on a run's first line, which holds the startup's statements). |
 | `sqlN`, `sqlMs` | The statements the main thread sent on PostgreSQL since the line before, and their client time from send to answer or failure. A run's first line also holds the startup's statements, and a module API request's or the admin endpoints' reads during a sync count in the height then in progress. A height that does not commit drops what it counted (the statements' file keeps them). |
 | `encMs`, `decMs` | Those statements' parameters encoded, and their rows decoded. |
 | `rt.<type>`, `rtN.<type>` | The ledger worker's requests of that type (`apply`, `parse`, `commit`, `evict`, `load`, `release`, …): their round trips, from the post to the answer handled, and how many. |

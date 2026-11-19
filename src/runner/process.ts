@@ -358,6 +358,7 @@ import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import type { InMemoryBlockSource } from "./in-memory-source.js";
 import { configurationRefusalLines, shownRefusal } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
+import type { FastSync } from "./fast-sync.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf, startupRejection } from "./failures.js";
 import { followSignal } from "./host-signal.js";
 import {
@@ -1685,6 +1686,7 @@ class Process implements ProcessHandle {
   /**
    * A stop once startup has completed: ends every node call the loop awaits outside a block transaction (the next
    * height's block through the node source's prefetch, the state root that `core-ledger-state`'s `on-compute` awaits,
+   * the blocks and the state roots of a chunk, which the loop waits for before the chunk's `BEGIN`,
    * a module's node call), rather than once the loop has ended, which it does not while such a call retries an
    * unreachable node without limit.
    *
@@ -2020,6 +2022,8 @@ class Process implements ProcessHandle {
   }
 
   async #open({ declarations, checked, core, source, db }: Opened): Promise<Startup> {
+    /** The loop this startup makes, once made: the ledger worker reads stored nodes through it. */
+    const opened: { loop?: FinalizedLoop } = {};
     const input = this.#input;
     const settings = core.settings as PlainObject;
     const { durabilityWarnings } = await startWriter(db);
@@ -2087,8 +2091,9 @@ class Process implements ProcessHandle {
       const sources = settings.ledgerSources as VerifyLedgerPackagesOptions["sources"];
       (input.checkLedgerPackages ?? checkLedgerPackages)(sources === undefined ? {} : { sources });
       this.#ledger ??= ledgerWorkerOf(input, this.#workerOutput())();
-      // A request given no read (a parse) reads stored nodes through the process's database.
-      this.#ledger.useDatabase({ read: (body) => db.read(body) });
+      // A request given no read (a parse) reads stored nodes through this startup's loop once it exists: while a
+      // chunk's transaction is open, a view of it, so a parse of a block above the chunk finds the nodes the chunk wrote.
+      this.#ledger.useDatabase({ read: (body) => (opened.loop === undefined ? db.read(body) : opened.loop.read(body)) });
       if (parses) bindLedgerParser(contexts.of(CORE_BLOCK_PARSED_ID), this.#ledger);
       for (const part of graph.modules) if (hasLedgerTasks(part)) bindLedgerTasks(contexts.of(part.id), this.#ledger);
       if (applies && isBlockLedgerSource(source)) {
@@ -2199,8 +2204,12 @@ class Process implements ProcessHandle {
       pause: this.#pauses,
       // The ledger worker's host follows each block's transaction: it commits in the worker the blocks applied there.
       ...(this.#ledger === undefined ? {} : { follower: this.#ledger }),
+      // Chunks only on a public process that waits for no private instance at its blocks.
+      ...(this.#side === "public" && this.#lockstep === undefined ? { fastSync: settings.fastSync as unknown as FastSync } : {}),
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
+        dropped: (failure) =>
+          this.#log(`processing: a block below height ${failure.height} failed first, so its kept failure is dropped: ${messageOf(failure)}`),
         head: (head) => {
           if (this.#head === null || head.height > this.#head) this.#head = head.height;
           // Nothing to process (the loop waits): whatever was retried works again.
@@ -2215,6 +2224,7 @@ class Process implements ProcessHandle {
       },
     });
     this.#loop = loop;
+    opened.loop = loop;
     const { server } = this.#api;
     const api = server === null ? null : Object.freeze({ host: server.host, port: server.port });
     // Not stopping (the step above): from here on a stop finds the loop running.

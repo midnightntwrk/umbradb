@@ -1,7 +1,7 @@
 import { CORE_CONTRACT_STATES } from "../../src/backbone/core-contract-states/core-contract-states.js";
 import type { CoreLedgerStateOptions } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
-import { startLedgerWorker } from "../../src/ledger/worker/host.js";
+import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { type Ledger, RAW } from "../ledger/adapter-fixtures.js";
 import { free, hex, taggedRootKey, untag } from "../ledger/node-format.js";
 import { rebuildTagged } from "../ledger/stored-values.js";
@@ -66,15 +66,24 @@ export async function conversionRun(
   found: FoundTape,
   retainStates: number,
   core: CoreLedgerStateOptions = {},
+  more: {
+    /** More `core` settings (fast-sync mode's). */
+    readonly settings?: Readonly<Record<string, unknown>>;
+    /** The worker as the process gets it, wrapped by an instrument of the test's. */
+    readonly worker?: (host: LedgerHost) => LedgerHost;
+  } = {},
 ): Promise<ConversionRun> {
   const record = workerRecord();
   const seen = seenTables();
   const process = await ingest(db, cappedAt(found.read().records, CONVERSION_LAST), {
     start: 0n,
     core: [...sweepCore(core), CORE_CONTRACT_STATES],
-    settings: { ...devnetSettings(found), retainStates },
+    settings: { ...devnetSettings(found), retainStates, ...more.settings },
     user: [sweepWatcher(seen, record)],
-    ledgerWorker: () => recordingWorker(startLedgerWorker(), record),
+    ledgerWorker: () => {
+      const recording = recordingWorker(startLedgerWorker(), record);
+      return more.worker === undefined ? recording : more.worker(recording);
+    },
   });
   try {
     await committed(process, CONVERSION_LAST, PATIENCE_MS * 2);

@@ -72,7 +72,7 @@ function contextAt(start: bigint): ProcessContext {
  * height) unless given.
  */
 function contextOf(block: BlockRef, items: ReadonlyMap<string, unknown> = standInItems(block.height), continues = false): BlockContext {
-  return Object.freeze({ ...block, items, settings: Object.freeze({}), active: () => true, continues });
+  return Object.freeze({ ...block, items, settings: Object.freeze({}), active: () => true, continues, blockBeforeCommitted: async () => undefined });
 }
 
 /** A block at `height` whose hash and parent are the given ones (the default chain's otherwise). */

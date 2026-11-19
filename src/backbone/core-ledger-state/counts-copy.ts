@@ -39,9 +39,10 @@
  * emptying below keep:
  * - at a block's `on-compute`, before it is handed over, when its context says the block before does not continue into
  *   it (`BlockContext.continues` false: a process's first block, every block made again after a failure, the block
- *   after a `COMMIT` whose answer was lost, a block on another writer's session than the one that committed the block
+ *   after a `COMMIT` whose answer was lost, a block on another writer's session than the one that wrote the block
  *   before): a settle may have updated it for a transaction that did not commit, or another writer may have changed
- *   the tables ({@link CountsCopy.begin});
+ *   the tables ({@link CountsCopy.begin}). While the block before continues, its settle's changes are in the
+ *   database, committed or in the transaction this block is written in;
  * - when a settle throws, before its error goes on: nothing a failed settle read or applied is kept
  *   ({@link CountsCopy.failed});
  * - by its bound, before a key or a list that would pass it ({@link CountsCopy.max}).

@@ -1,6 +1,6 @@
 /**
  * A read-only view inside an open write transaction, for a caller that must read inside a transaction it has written
- * in. Core. Nothing calls it yet.
+ * in. Core. The finalized loop reads through it inside a transaction that holds several blocks (`../runner/loop.ts`).
  *
  * **What the view is.** {@link readView} runs `body` with a read handle whose statements run in the transaction `tx`,
  * between the two texts of `./read-view-sql.ts`, each sent as one simple-protocol text:

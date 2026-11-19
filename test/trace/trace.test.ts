@@ -14,9 +14,13 @@ import {
   stopTrace,
   traceAdd,
   traceChain,
+  traceCommitHeld,
   tracedRead,
   traceDropBlock,
+  traceDropHeld,
   traceEndBlock,
+  traceHoldBlock,
+  traceResumeHeld,
   traceMark,
   tracePush,
   traceStatement,
@@ -83,6 +87,10 @@ describe("the block trace, not started", () => {
     traceWorker({ h: 1 });
     traceEndBlock(1n);
     traceDropBlock();
+    traceHoldBlock();
+    traceCommitHeld([1n, 2n], 1);
+    traceResumeHeld();
+    traceDropHeld();
     stopTrace();
     // A read wrapped for the trace still answers.
     expect(await tracedRead("rows", async (keys: readonly number[]) => new Set(keys))([1, 2])).toEqual(new Set([1, 2]));
@@ -359,6 +367,179 @@ describe("the block trace, started", () => {
       ["other", 0, 0],
     ]);
     for (const [, , ms] of reads) expect(ms).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("the block trace's held records: heights stored in one transaction", () => {
+  /** A line without the clock and the memory, which differ between any two runs. */
+  const steady = (line: Record<string, unknown>): Record<string, unknown> => {
+    const { t: _t, mem: _mem, ...rest } = line;
+    return rest;
+  };
+
+  /** What height `h` records before its writes end: a time, a statement and a step output. */
+  const work = (h: number): void => {
+    traceAdd("prepareMs", h);
+    traceStatement(`SELECT ${h}`, 0.25);
+    traceChain([String(h), [`k${h}`]]);
+    traceAdd("txMs", h * 10);
+  };
+
+  /** The lines of heights 1 to 3 ended one by one, each with its `COMMIT` and its work after it. */
+  function oneByOne(): Record<string, unknown>[] {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    for (let h = 1; h <= 3; h++) {
+      work(h);
+      if (h === 3) traceStatement("COMMIT", 0.5);
+      traceAdd("afterMs", h / 10);
+      traceEndBlock(BigInt(h));
+    }
+    stopTrace();
+    return memory.blockLines().map(steady);
+  }
+
+  it("three heights held, committed and resumed: the lines and sh of three heights ended one by one, but for chunk and the last one's txMs", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    for (let h = 1; h <= 3; h++) {
+      work(h);
+      traceHoldBlock();
+    }
+    // The COMMIT is sent while the three are held: it is the last one's.
+    traceStatement("COMMIT", 0.5);
+    traceCommitHeld([1n, 3n], 2);
+    for (let h = 1; h <= 3; h++) {
+      traceResumeHeld();
+      traceAdd("afterMs", h / 10);
+      traceEndBlock(BigInt(h));
+    }
+    stopTrace();
+    const held = memory.blockLines().map(steady);
+    const expected = oneByOne().map((line, index) => ({
+      ...line,
+      chunk: [1, 3],
+      ...(index === 2 ? { txMs: (line.txMs as number) + 2 } : {}),
+    }));
+    expect(held).toEqual(expected);
+    expect(held.map((line) => line.sh)).toEqual(oneByOne().map((line) => line.sh));
+    expect(held[2]).toMatchObject({ commitMs: 0.5, sqlN: 2, sqlMs: 0.75 });
+    expect(held[0]).not.toHaveProperty("commitMs");
+  });
+
+  it("a COMMIT sent while records are held lands in the last held one, never in a later height's; other statements in the current height's", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    work(1);
+    traceHoldBlock();
+    work(2);
+    traceHoldBlock();
+    // Height 3 has begun: its own statements are its own, the COMMIT is height 2's.
+    traceStatement("SELECT 3b", 1);
+    traceStatement("COMMIT", 4);
+    traceCommitHeld([1n, 2n], 4);
+    for (const h of [1n, 2n]) {
+      traceResumeHeld();
+      traceEndBlock(h);
+    }
+    traceEndBlock(3n);
+    stopTrace();
+    const [one, two, three] = memory.blockLines();
+    expect(one).toMatchObject({ sqlN: 1, sqlMs: 0.25 });
+    expect(one).not.toHaveProperty("commitMs");
+    expect(two).toMatchObject({ sqlN: 2, sqlMs: 4.25, commitMs: 4, txMs: 24, chunk: [1, 2] });
+    expect(three).toMatchObject({ sqlN: 1, sqlMs: 1 });
+    expect(three).not.toHaveProperty("commitMs");
+    expect(three).not.toHaveProperty("chunk");
+  });
+
+  it("one record held: no chunk mark, its line as a height ended alone with the COMMIT in its txMs", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    work(1);
+    traceHoldBlock();
+    traceCommitHeld([1n, 1n], 3);
+    traceResumeHeld();
+    traceEndBlock(1n);
+    stopTrace();
+    const [line] = memory.blockLines();
+    expect(line).not.toHaveProperty("chunk");
+    expect(line).toMatchObject({ txMs: 13, prepareMs: 1 });
+  });
+
+  it("a record in progress is set aside while the held ones are resumed, and ends later with its own values", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    work(1);
+    traceHoldBlock();
+    work(2);
+    traceHoldBlock();
+    // Height 3's work before the commit of 1 and 2: its prepareMs, a statement and its step output.
+    traceAdd("prepareMs", 3);
+    traceStatement("SELECT 3", 0.25);
+    traceChain(["3", ["k3"]]);
+    traceCommitHeld([1n, 2n], 0);
+    for (const h of [1n, 2n]) {
+      traceResumeHeld();
+      traceAdd("afterMs", Number(h) / 10);
+      traceEndBlock(h);
+    }
+    // Height 3's record is the current one again.
+    traceAdd("txMs", 30);
+    traceStatement("COMMIT", 0.5);
+    traceAdd("afterMs", 0.3);
+    traceEndBlock(3n);
+    stopTrace();
+    const lines = memory.blockLines().map(steady);
+    const expected = oneByOne().map((line, index) => (index < 2 ? { ...line, chunk: [1, 2] } : line));
+    expect(lines).toEqual(expected);
+  });
+
+  it("dropped records leave no line and the chain as it was before them: heights made again chain as heights made once", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    work(1);
+    traceEndBlock(1n);
+    work(2);
+    traceHoldBlock();
+    work(3);
+    traceHoldBlock();
+    traceAdd("prepareMs", 99);
+    traceChain(["4", ["k4"]]);
+    // The transaction rolled back: the held records and the height in progress are dropped.
+    traceDropHeld();
+    traceDropBlock();
+    expect(memory.blockLines()).toEqual([]);
+    for (let h = 2; h <= 3; h++) {
+      work(h);
+      if (h === 3) traceStatement("COMMIT", 0.5);
+      traceEndBlock(BigInt(h));
+    }
+    stopTrace();
+    const lines = memory.blockLines().map(steady);
+    const expected = oneByOne().map(({ afterMs: _after, ...line }) => line);
+    expect(lines).toEqual(expected);
+  });
+
+  it("the negative control: a hold that starts the next height's chain from the committed chain gives another sh", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    for (let h = 1; h <= 3; h++) {
+      work(h);
+      traceHoldBlock({ chainFrom: "committed" });
+    }
+    traceStatement("COMMIT", 0.5);
+    traceCommitHeld([1n, 3n], 2);
+    for (let h = 1; h <= 3; h++) {
+      traceResumeHeld();
+      traceEndBlock(BigInt(h));
+    }
+    stopTrace();
+    const sh = memory.blockLines().map((line) => line.sh);
+    const once = oneByOne().map((line) => line.sh);
+    expect(sh[0]).toBe(once[0]);
+    expect(sh[1]).not.toBe(once[1]);
+    expect(sh[2]).not.toBe(once[2]);
   });
 });
 

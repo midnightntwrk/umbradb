@@ -182,6 +182,7 @@ The `core` entry's settings, the main ones (`GET /config` shows them all, with t
 | `backupOnSignal` | none | A file the process writes a backup to on SIGUSR2, without stopping |
 | `retainStates` | `0` | Ledger states kept before the latest (`core-ledger-state`) |
 | `reclamationCache` | `{ keys: 100000, verify: false }` | The counts and child lists `core-ledger-state`'s reclamation keeps in memory between blocks: at most `keys` of each (0 for none; 71.9 MiB of heap at 100,000 with lists of 16 references), and whether each one it answers is also read from the database, a difference halting the block. Exact on tables undamaged at the start and written by this process only |
+| `fastSync` | `{ blocks: 0, distance: 600 }` | Fast-sync mode: far behind the head (at least `distance` heights), up to `blocks` heights stored in one transaction (0 or 1: off; at most 1,000); a public process only. The cursor and the API then move a chunk at a time (operator guide) |
 | `livenessTimeoutMs` | `30000` | `/health/live` answers 503 when the main loop is stuck longer |
 | `slowBlockMs` | `60000` | The `slow-block` condition after a height runs longer |
 | `apiReadTimeoutMs` | `30000` | A module API request's read, on PostgreSQL (504 `query-timeout`) |

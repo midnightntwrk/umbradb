@@ -324,33 +324,44 @@ Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made ta
 | `on-rollback` | queued best blocks were dropped | their headers | in series |
 | `on-finalized` | a new finalized head, before its heights | read at the cursor | in series |
 | `on-start-height` | your entry's start height | read at h − 1 | in series |
-| `on-compute` | before the block transaction opens | read at h − 1, item sink | in waves |
+| `on-compute` | before the block's writes | read at h − 1, item sink | in waves, or one at a time |
 | `on-db-write` | inside the block transaction | block write handle | in series |
 | `on-settle` | inside the block transaction, after every `on-db-write` | block write handle | in series |
-| `on-after-db-write` | after the commit; no `block` items | read at h | in series |
+| `on-after-db-write` | once the block is stored; later blocks may already be stored; no `block` items | read at the last committed height (h or above): read by `block.height` | in series |
 | `on-stop-height` | after your entry's stop height committed | read at h | in series |
 
 - **Arguments.** Every callback gets the process context `processContext` first (§8, §13). The block points get `block`:
   `height`, `hash`, `parentHash`, `items`, `settings` (your revision's at this height), `active(moduleId)` and
-  `continues` (below). `on-settle` gets `run` instead (below).
-- **Which point for which job.** Compute in `on-compute`: it reads the state before the block, and modules there run in
-  parallel. Write a block's rows in `on-db-write`, inside the block's transaction. Notify in `on-after-db-write`, once
-  the height is committed. Set up in `on-start-db`; register routes in `on-start-api`.
-- **The block before, from memory: `block.continues`.** True exactly when the block before was committed by this
-  process in the same run of processing (its `COMMIT` answered, no failure, retry or restart since) and the writer
-  still has the database session that committed it when your callback's context is made (at `on-compute` and
-  `on-after-db-write` once its read is open). That session holds the writer lock, so no other writer can have changed
-  a row since, and what your module kept in memory while it processed that block is what the database holds. Then you
-  may use that memory instead of reading the block before from the database. It is false at the first height after a
-  start or a retry, for a height processed again after a failure (§12), for the height after one whose `COMMIT` lost
-  its answer, at the re-delivery after a restart, from the first context made after the writer's session was replaced
-  to the end of that block (on PostgreSQL, a connection lost while idle is replaced by the next transaction's, and
-  another writer may have held the lock in between, also during the block's own callbacks or after its `COMMIT`; on
-  PGlite the session lasts as long as the process), and always at `on-fetch` and `on-parse`, which may run before the
-  block before committed. If the writer's session is replaced after some of your callbacks were told true, the block
-  is not written on the new session: that attempt fails as a lost connection does (retryable), and the block is made
-  again with `continues` false. It may be false at any block: read the block before from the database then, and drop
-  what you kept.
+  `continues` and `blockBeforeCommitted()` (below). `on-settle` gets `run` instead (below).
+- **Which point for which job.** Compute in `on-compute`: it reads the state before the block, and modules there may run
+  in parallel (they may also be called one at a time). Write a block's rows in `on-db-write`, inside the block's
+  transaction. Notify in `on-after-db-write`, once the height is committed: later heights may already be committed
+  then, and its read sees the last committed height (`read.height`), so read your rows by `block.height`, never "the
+  latest". Set up in `on-start-db`; register routes in `on-start-api`.
+- **The block before, from memory: `block.continues`.** True exactly when the block before was stored by this process
+  in the same run of processing, with no failure, retry, rollback or restart since: its `COMMIT` answered, or its rows
+  were written in the transaction this block is written in; and the writer still has the database session that wrote
+  it when your callback's context is made (at `on-compute` and `on-after-db-write` once its read is open). That
+  session holds the writer lock, so no other writer can have changed a row since, and what your module kept in memory
+  while it processed that block is what the database holds for this block. Then you may use that memory instead of
+  reading the block before from the database. It is false at the first height after a start or a retry, for a height
+  processed again after a failure (§12), at the first height after any rollback, for the height after one whose
+  `COMMIT` lost its answer, at the re-delivery after a restart, from the first context made after the writer's session
+  was replaced to the end of that block (on PostgreSQL, a connection lost while idle is replaced by the next
+  transaction's, and another writer may have held the lock in between, also during the block's own callbacks or after
+  its `COMMIT`; on PGlite the session lasts as long as the process), and always at `on-fetch` and `on-parse`, which may
+  run before the block before was written. If the writer's session is replaced after some of your callbacks were told
+  true, the block is not written on the new session: that attempt fails as a lost connection does (retryable), and the
+  block is made again with `continues` false. It may be false at any block: read the block before from the database
+  then, and drop what you kept.
+- **The block before, committed: `block.blockBeforeCommitted()`.** An `on-compute` callback that must read the block
+  before as committed rows (it reads a large part of the state it left, which may take minutes) awaits
+  `block.blockBeforeCommitted()`. It resolves once the block before is committed: at once when it is already;
+  otherwise UmbraDB commits it first. You may call it before or after reading through your read: what you read before
+  the call stays read, and your statements after it see the block before committed, at the same height. Calling it
+  again in the same callback gives the same promise, which never resolves before the commit. Called at another point,
+  or after your callback returned (a function you kept), it throws (a programming error). UmbraDB's
+  `core-ledger-state` calls it before a ledger conversion.
 - **`on-settle`.** `"on-settle"(processContext, run, writer)` gets `run`, `{ first, last }`: heights, `bigint`s as
   `block.height` is, both included, `first <= last`. UmbraDB calls it inside the transaction that holds the run's last
   block, after every module's `on-db-write` of that block and before the `COMMIT`, in `on-db-write`'s order. `writer`
@@ -513,7 +524,7 @@ counts and queue (after a restart, for one).
   bounded; `db.read(body, { timeoutMs })` ends a statement, or the read left idle, after `timeoutMs` on PostgreSQL with
   `query-timeout`. PGlite enforces neither timeout. Never call `db.read` inside a callback that has a handle, or from an
   API handler: on PGlite it fails at once (`database-error`, `reason: nested-call`), and on PostgreSQL it reads the
-  state before the block, without any of the block's writes. Store nothing derived from it outside tables declared
+  last committed height, without any of the block's writes, which may be below the block before. Store nothing derived from it outside tables declared
   `deterministic: false` (§4.3). Keep reads short: on PGlite a read holds the database's one queue, and the next block
   waits.
 
@@ -756,8 +767,28 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 |---|---|---|
 | `on-fetch`, `on-parse` | fetched ahead, for best blocks, after a lost connection | keep no state past the block |
 | `on-start-height` | after a restart, if the start height had not committed | make it idempotent |
-| `on-compute`, `on-db-write`, `on-settle` | after a lost connection; only a committed run's writes stay | no outside effects |
-| `on-after-db-write`, `on-stop-height` | after a restart, for the last committed height | a notification may repeat |
+| `on-compute`, `on-db-write`, `on-settle` | after a lost connection or a rollback, for several heights not yet committed; only committed writes stay | no outside effects |
+| `on-after-db-write`, `on-stop-height` | after a restart, for the last committed height only; heights committed with it may not have had theirs | a notification may repeat, or be missing for a height below the last |
+
+- **Several heights in one transaction.** UmbraDB may write several consecutive heights in one database transaction.
+  Your callbacks are called for every block as described above; what differs:
+  - What a `COMMIT` does for a block, it does at that block. UmbraDB puts a block in a transaction with other blocks
+    only while nothing exists that a `COMMIT` acts on: a deferrable constraint (declared `INITIALLY DEFERRED` or
+    `INITIALLY IMMEDIATE`), a constraint trigger, a temporary table or sequence in the writer's session, an open
+    cursor. So a deferred constraint is checked, a deferred trigger fires, a temporary table's `ON COMMIT` action runs
+    and a cursor is closed (or, declared `WITH HOLD`, its query run to its end) at the `COMMIT` of the block that left
+    them, and a block that leaves a deferred constraint violated fails there.
+  - Having one of them costs speed, nothing else: while your schema or session has one, UmbraDB commits every block
+    on its own. Nothing changes for your callbacks, and heights are stored more slowly. Declare a constraint
+    deferrable only when you need it, and close a cursor in the callback that declared it.
+  - `now()`, the transaction id, a setting made for the transaction (`SET LOCAL`, `set_config(…, true)`), transaction
+    advisory locks, row and table locks, `NOTIFY`, `LISTEN` and a large object's descriptor belong to the transaction,
+    not to the block: a setting one block made is still there for the next, other sessions wait for a lock until the
+    transaction commits, and notifications arrive then, equal ones once. Set what a callback reads in that callback,
+    and do not store `now()` or a sequence's value as if it were the block's.
+  - A retained ledger state (§9) loads where the retention window at your read's height holds it: at
+    `on-after-db-write`, that height may be above the block's, and a state below its window fails with
+    `state-not-retained`.
 
 ## 13. Providing items to other modules
 

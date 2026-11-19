@@ -281,7 +281,7 @@ describe("the module guide", () => {
       "a timer, a background job, a check at startup",
       "Never call `db.read` inside a callback that has a handle",
       "`reason: nested-call`",
-      "the state before the block, without any of the block's writes",
+      "the last committed height, without any of the block's writes",
       "never cut off",
     ]) {
       expect(section, text).toContain(text);
