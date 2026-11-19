@@ -1,7 +1,7 @@
 /**
  * The design's retirement list ("Quality gates: what moves and what is retired"), transcribed, and the checks that
- * compare the tree with it. The four main lists are the required-test manifest, `stryker.conf.json` `mutate`, the
- * coverage floors of `vitest.config.ts` and the file list of `Formal/Lean`. The list's other rows are the retired
+ * compare the tree with it. The three main lists are the required-test manifest, the coverage floors of
+ * `vitest.config.ts` and the file list of `Formal/Lean`. The list's other rows are the retired
  * files, the scripts and the barrel's names.
  *
  * Every check takes plain data and returns one sentence per problem, empty when there is none, so
@@ -158,76 +158,6 @@ export const RETIRED_REQUIRED_IDS: readonly string[] = [
 
 /** The deferred id, retired with the 0.9.5 save it was deferred for. */
 export const RETIRED_DEFERRED_IDS: readonly string[] = ["crash.pg-kill-save.no-duplicate-with-idempotency-key"];
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Mutation (`stryker.conf.json` `mutate`, break 65; `vitest.mutation.config.ts`)
-// ---------------------------------------------------------------------------------------------------------------------
-
-/**
- * The retirement list's mutation targets, at the paths the build gave them. The list named:
- * - `src/runner/order.ts`, the order within a point, now `src/runner/dispatch.ts`;
- * - `src/ledger/sweep.ts`, the ledger state's sweep step, built as `src/backbone/core-ledger-state/sweep.ts`; the sweep
- *   removed, the reclamation step that replaced it, `src/backbone/core-ledger-state/refcount.ts`, was the target in its
- *   place, and once the step moved to the tests as their reference, the run computation that replaced it,
- *   `src/backbone/core-ledger-state/run-reclaim.ts`, is;
- * - `src/backbone/block-fetch-queue.ts`, the best-block queue and the finalized prefetch, now
- *   `src/backbone/core-block-fetch/node-source.ts`.
- *
- * Each comes with the fast tests that kill its mutants; `vitest.mutation.config.ts` runs exactly their union, and
- * Stryker runs, per target, those that import it.
- */
-export const MUTATION_TARGETS: Readonly<Record<string, readonly string[]>> = {
-  "src/modules/graph.ts": ["test/modules/graph.test.ts", "test/modules/graph-public-items.test.ts"],
-  "src/runner/dispatch.ts": ["test/runner/dispatch.test.ts", "test/runner/order.property.test.ts"],
-  "src/config/history.ts": ["test/config/history.test.ts", "test/config/history.property.test.ts"],
-  "src/determinism/cbor.ts": ["test/determinism/cbor.test.ts", "test/determinism/cbor.property.test.ts"],
-  "src/determinism/digest.ts": ["test/determinism/digest.test.ts"],
-  "src/helpers/height-versioned.ts": [
-    "test/helpers/height-versioned.test.ts",
-    "test/helpers/height-versioned.property.test.ts",
-  ],
-  "src/helpers/cursor-table.ts": ["test/helpers/cursor-table.test.ts", "test/helpers/cursor-table.property.test.ts"],
-  "src/backbone/core-ledger-state/run-reclaim.ts": [
-    "test/backbone/run-reclaim.test.ts",
-    "test/backbone/run-reclaim.negative-control.test.ts",
-    "test/backbone/run-reclaim-histories.test.ts",
-  ],
-  "src/backbone/core-block-fetch/node-source.ts": ["test/backbone/node-source.test.ts"],
-};
-
-/** The five 0.9.5 adapters the retirement list retires as targets. */
-export const RETIRED_MUTATION_TARGETS: readonly string[] = [
-  "src/postgres/save-and-advance.ts",
-  "src/postgres/checkpoint-store.ts",
-  "src/postgres/watermarks.ts",
-  "src/postgres/transaction-lease.ts",
-  "src/postgres/temporal-kv.ts",
-];
-
-/** The break threshold the retirement list keeps. */
-export const MUTATION_BREAK = 65;
-
-/** `stryker.conf.json`'s `mutate` and break, and the mutation run's tests, against the retirement list. */
-export function mutationProblems(mutate: readonly string[], include: readonly string[], breakAt: number): string[] {
-  const problems: string[] = [];
-  const targets = Object.keys(MUTATION_TARGETS);
-  for (const file of mutate) {
-    if (RETIRED_MUTATION_TARGETS.includes(file)) problems.push(`stryker.conf.json still mutates ${file}, retired`);
-    else if (!targets.includes(file)) problems.push(`stryker.conf.json mutates ${file}, not a target of design.md §13`);
-  }
-  for (const file of targets) {
-    if (!mutate.includes(file)) problems.push(`stryker.conf.json does not mutate ${file}, a target of design.md §13`);
-  }
-  const tests = new Set(Object.values(MUTATION_TARGETS).flat());
-  for (const file of include) {
-    if (!tests.has(file)) problems.push(`the mutation run includes ${file}, not a test of a target of design.md §13`);
-  }
-  for (const file of tests) {
-    if (!include.includes(file)) problems.push(`the mutation run lacks ${file}, a test of a target of design.md §13`);
-  }
-  if (breakAt !== MUTATION_BREAK) problems.push(`stryker.conf.json breaks at ${breakAt}, design.md §13 keeps 65`);
-  return problems;
-}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Coverage floors (`vitest.config.ts`)
