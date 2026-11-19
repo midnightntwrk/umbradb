@@ -52,10 +52,17 @@ export interface PauseHold {
 /** What the loop is given to pause between heights (`LoopInput.pause`, `./loop.ts`). */
 export interface LoopPause {
   /**
-   * Whether a hold is kept now. Inside a chunk of blocks in one transaction the loop reads it before each block after
-   * the first: a hold ends the chunk there with a `COMMIT`, so the loop reaches the pause between heights.
+   * Whether a hold is kept now. For a chunk of blocks in one transaction the loop reads it before it takes each block,
+   * before it waits for what the later blocks ask of the source, and before each block after the first: a hold ends
+   * the chunk there (with its `COMMIT`, once its transaction is open), so the loop reaches the pause between heights.
    */
   readonly held: boolean;
+  /**
+   * Tells `listener` once, when the next hold is taken; returns what takes the listener back. The loop listens while
+   * it waits, with no transaction open, for what the later blocks of a chunk ask of the source: a hold taken meanwhile
+   * ends that wait, so the loop reaches the pause between heights without it.
+   */
+  onHold(listener: () => void): () => void;
   /**
    * The loop is between two heights: resolves at once while no hold is kept, else once every hold is released or
    * `signal` aborts; each hold kept meanwhile is told it was reached.
@@ -73,6 +80,8 @@ export class LoopPauses implements LoopPause {
   #between = false;
   /** Wakes the loop held at {@link between}. */
   #lift: (() => void) | undefined;
+  /** Who is told of the next hold ({@link onHold}). */
+  readonly #listeners = new Set<() => void>();
   /** When the loop paused, while holds have been kept since; null otherwise. */
   #since: number | null = null;
   /** What {@link pausedAt} gave when {@link #changed} last looked, as text. */
@@ -102,6 +111,11 @@ export class LoopPauses implements LoopPause {
     return Object.freeze({ since: this.#since as number, by });
   }
 
+  onHold(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => void this.#listeners.delete(listener);
+  }
+
   /** A new hold by `by` (see the module comment): reached at once while the loop is between heights. */
   hold(by: PauseBy = "pause"): PauseHold {
     const token = Symbol("hold");
@@ -114,6 +128,10 @@ export class LoopPauses implements LoopPause {
       this.#holds.set(token, { by, tell: null });
     } else {
       this.#holds.set(token, { by, tell });
+    }
+    for (const listener of [...this.#listeners]) {
+      this.#listeners.delete(listener);
+      listener();
     }
     this.#changed();
     return Object.freeze({

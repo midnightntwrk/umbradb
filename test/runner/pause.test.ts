@@ -106,6 +106,25 @@ describe("LoopPauses: the holds of the pause between heights", () => {
     expect(await settled(pauses.between(new AbortController().signal))).toBe(true);
   });
 
+  it("tells a listener of the next hold once, when it is taken; a listener taken back, and one already told, are not told", () => {
+    const pauses = new LoopPauses();
+    const told: string[] = [];
+    pauses.onHold(() => told.push("first"));
+    const back = pauses.onHold(() => told.push("taken back"));
+    back();
+    expect(told).toEqual([]);
+    const one = pauses.hold();
+    expect(told).toEqual(["first"]);
+    // Told once: a second hold tells only who listens then.
+    pauses.onHold(() => told.push("second"));
+    const two = pauses.hold("signal");
+    expect(told).toEqual(["first", "second"]);
+    one.release();
+    two.release();
+    expect(pauses.held).toBe(false);
+    expect(told).toEqual(["first", "second"]);
+  });
+
   it("ends the pause when the loop's signal aborts (a stop while paused), the hold still kept", async () => {
     const pauses = new LoopPauses();
     const hold = pauses.hold();
