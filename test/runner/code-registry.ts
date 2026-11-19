@@ -146,7 +146,7 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   // ── startup refusals ─────────────────────────────────────────────────────────────────────────────────────────────
   "refusal:genesis-mismatch": [
     {
-      file: "test/backbone/chain-process.test.ts",
+      file: "test/backbone/chain-process.ts",
       test: "a node of another network than the configured one, also on an empty database, or than the stored one refuses with genesis-mismatch, a known network without a recorded genesis refuses, another hash at the cursor refuses with cursor-hash-mismatch, a head below the cursor waits",
     },
     {
@@ -156,7 +156,7 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   ],
   "refusal:cursor-hash-mismatch": [
     {
-      file: "test/backbone/chain-process.test.ts",
+      file: "test/backbone/chain-process.ts",
       test: "a node of another network than the configured one, also on an empty database, or than the stored one refuses with genesis-mismatch, a known network without a recorded genesis refuses, another hash at the cursor refuses with cursor-hash-mismatch, a head below the cursor waits",
     },
     {
@@ -184,7 +184,7 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   ],
   "refusal:invalid-configuration": [
     {
-      file: "test/backbone/chain-process.test.ts",
+      file: "test/backbone/chain-process.ts",
       test: "a custom network without its genesisHash refuses at validation, before the database opens or the node is asked",
     },
   ],
@@ -481,7 +481,7 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   ],
   "halt:duplicate-block-hash": [
     {
-      file: "test/backbone/chain-process.test.ts",
+      file: "test/backbone/chain-process.ts",
       test: "one blocks and one hashes row per height; a linking block repeating a hash in another partition halts with duplicate-block-hash; a fresh hash commits",
     },
   ],

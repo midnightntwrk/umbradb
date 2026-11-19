@@ -43,7 +43,7 @@ failed, and a running total — and serves the rows over HTTP and a subscription
 
 ```ts
 import { z } from "zod";
-import { answerChainData, defineModule, type ParsedTransaction } from "umbradb";
+import { defineModule, defineRoute, hexBytes, type ParsedTransaction, RouteError, uintText } from "umbradb";
 import { insertRow, lastTotal, migrations, recentRows, rowAt } from "./sql.ts";
 
 type Outcome = "success" | "partial" | "failure";
@@ -172,10 +172,46 @@ export async function rowAt(read: ReadHandle, height: bigint): Promise<Record<st
 }
 ```
 
-Beside the declaration:
+Beside the declaration, the shape of a row as the API gives it, and one route:
 
 ```ts
 const subscribers = new Set<{ minTx: number; emit: (value: unknown) => void }>();
+
+// A stored row as the API gives it. uintText(64) is a bigint here and digits in a string to a client, which no JSON
+// reader rounds; hexBytes() is "0x" and lowercase hex.
+const Block = z.strictObject({
+  height: uintText(64),
+  hash: hexBytes(),
+  block_time: z.string(),
+  tx_count: z.int(),
+  failed_count: z.int(),
+  total_tx: uintText(64),
+});
+
+// A row of ./sql.ts as a Block: the hash's bytes as hex, the rest as stored. The output schema checks it.
+const blockOf = (row: Record<string, unknown>): z.output<typeof Block> => ({
+  height: row.height as bigint,
+  hash: `0x${Buffer.from(row.hash as Uint8Array).toString("hex")}`,
+  block_time: row.block_time as string,
+  tx_count: row.tx_count as number,
+  failed_count: row.failed_count as number,
+  total_tx: row.total_tx as bigint,
+});
+
+const noRow = () => new RouteError("not-found", "no-row", "no row at that height");
+
+const getBlock = defineRoute({
+  name: "getBlock",
+  description: "The row of one height.",
+  input: z.object({ height: uintText(64) }), // the path's :height, read as a bigint
+  output: Block,
+  http: { method: "GET", path: "/blocks/:height" },
+  async handle({ height }, { read, height: committed }) {
+    const row = height > committed ? undefined : await rowAt(read, height); // nothing is stored above the committed height
+    if (row === undefined) throw noRow();
+    return blockOf(row);
+  },
+});
 ```
 
 In `points`:
@@ -184,12 +220,9 @@ In `points`:
     async "on-start-api"(processContext, api) {
       const recentLimit = Number(processContext.revisions.at(-1)?.settings.recentLimit ?? 10);
 
-      api.http("GET", "/stats-module/latest", async (_request, read) =>
-        answerChainData(read, async (view) => {
-          const row = await rowAt(read, view.height);
-          return row === undefined ? { status: 404, body: { error: "no-row" } } : { status: 200, body: row };
-        }),
-      );
+      api.route(getLatest);
+      api.route(getBlock);
+      api.route(listRecent(recentLimit));
 
       api.subscription("stats-module-blocks", (args, emit) => {
         const subscriber = { minTx: Number((args as { minTx?: number } | null)?.minTx ?? 0), emit };
@@ -201,17 +234,19 @@ In `points`:
     async "on-after-db-write"(_processContext, block, read) {
       const row = subscribers.size > 0 ? await rowAt(read, block.height) : undefined;
       for (const subscriber of subscribers) {
-        if (row !== undefined && Number(row.tx_count) >= subscriber.minTx) subscriber.emit(row);
+        if (row !== undefined && Number(row.tx_count) >= subscriber.minTx) subscriber.emit(z.encode(Block, blockOf(row)));
       }
     },
 ```
 
-Routes are registered in `on-start-api`, and only there; each request gets a read of the latest committed height.
-`answerChainData` adds the headers `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (what the read saw) and answers
-503 before the first height commits. The body goes out as JSON: a `bigint` as decimal text, bytes as `0x` hex, and
-`block_time` as the RFC 3339 text it reads back as. `on-after-db-write` runs after the commit: it notifies and writes
-nothing. The example file has two more routes, `/stats-module/blocks/:height` and `/stats-module/recent` (which uses
-`recentLimit` and lists only blocks with transactions).
+A route is an operation: a name, a schema of its input and of its output, and a handler. It names no transport;
+`http` only says where HTTP serves it, under `/stats-module`, so `getBlock` is `GET /stats-module/blocks/:height`
+(§7). UmbraDB checks the input before the handler runs and the output before it is sent, reads each answer at one
+committed height, adds the headers `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (what the read saw), and answers
+503 before the first height commits. Routes are registered in `on-start-api`, and only there. `on-after-db-write` runs
+after the commit: it notifies and writes nothing, and `z.encode(Block, …)` gives a subscriber the row as a route sends
+it. The example file has two more routes: `getLatest` (`/stats-module/latest`), and `listRecent`
+(`/stats-module/recent`, which uses `recentLimit` and lists only blocks with transactions).
 
 ### 2.5 The configuration file
 
@@ -272,7 +307,7 @@ and exchanges JSON messages (`./try.sh subscribe` does):
 ```text
 → {"type":"subscribe","id":"s1","name":"stats-module-blocks","args":{"minTx":1}}
 ← {"type":"subscribed","id":"s1"}
-← {"type":"next","id":"s1","value":{"height":"…","hash":"0x…","tx_count":2,…}}
+← {"type":"next","id":"s1","value":{"height":"…","hash":"0x…","block_time":"…","tx_count":2,…}}
 ```
 
 Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made tables §10, private data §14, changes §15–16.
@@ -526,7 +561,86 @@ counts and queue (after a restart, for one).
 
 ## 7. The module API
 
-- **Routes.** `api.http(method, path, handler)` takes `GET` or `POST` and a path of `/` and segments, each a literal
+- **Routes** (the way to write an API). A route is one operation: a name, a [zod](https://zod.dev) schema of its
+  input and one of its output, and a handler between them. It names no transport. Declare it with `defineRoute` and
+  register it from `on-start-api` with `api.route(route)`; UmbraDB serves it over HTTP under `/<your-module-id>`, and
+  over any transport it adds later without a change to your module.
+
+  ```ts
+  import { z } from "zod";
+  import { defineRoute, RouteError } from "umbradb";
+
+  const getCount = defineRoute({
+    name: "getCount",
+    input: z.object({ height: z.int().min(0) }),
+    output: z.strictObject({ height: z.int(), rows: z.int() }),
+    http: { method: "GET", path: "/v1/counts/:height" }, // served as GET /my-module/v1/counts/:height
+    async handle({ height }, { read }) {
+      const [row] = await read.query("SELECT rows FROM my_module.counts WHERE height = $1", [BigInt(height)]);
+      if (row === undefined) throw new RouteError("not-found", "no-row", "no row at that height");
+      return { height, rows: Number(row.rows) };
+    },
+  });
+  // in points: async "on-start-api"(_processContext, api) { api.route(getCount); }
+  ```
+
+  - **Name:** lowerCamelCase, unique in your module. `<module-id>.<name>` identifies the route on every transport.
+  - **Schemas:** write the types your handler works with (`z.int()`, `z.boolean()`), not how HTTP writes them. What
+    travels must be JSON (what `z.toJSONSchema` can write), so a bare `z.bigint()` or `z.date()` is refused at startup.
+  - **Integers beyond 2^53:** `bigintText()` (an integer of at most 78 digits: 10^78 is above 2^256) and
+    `uintText(bits)` (0 to 2^bits − 1: `uintText(64)`, `uintText(128)`, `uintText(256)`). Your handler takes and
+    returns a `bigint`. A client sends digits in a string or a JSON number, and always receives digits in a string,
+    which no JSON reader rounds. They work in an input, an output and a page cursor. Give one a default on the wire
+    side, `bigintText().prefault("0")`.
+  - **Numbers are read exactly.** An integer in a request is exact however it is written (`5`, `5.0`, `5e3`,
+    `18446744073709551616`). A number that is no integer but would be read as one (`1.0000000000000001`) is refused,
+    never rounded.
+  - **Bytes** (a hash, an address, a key): `hexBytes()`, `0x` and lowercase hex, two digits a byte. It is text on
+    both sides, to your handler as to a client, since such a value is compared and looked up, not computed with. A
+    `bytea` column reads back as bytes, so write it as hex in your answer:
+    `` `0x${Buffer.from(row.hash as Uint8Array).toString("hex")}` ``.
+  - **Input:** it is checked against `input` before your handler runs, and your handler gets what the schema parsed
+    (defaults filled, transforms applied). A name `input` does not declare is refused at the top level; write nested
+    objects with `z.strictObject` to refuse it there too. A refused input is answered 400 `invalid-request`, naming
+    paths and rules but never the values sent. A message you write yourself (`{ error: "…" }` on a schema) is sent
+    as written, so keep the input out of it.
+  - **Output:** your answer is written with `output` (`z.encode`), which checks it, so a field it does not declare is
+    left out (refused, with `z.strictObject`). An answer it refuses is a bug: 500 `internal-error`, logged, never
+    sent. So is one JSON has no value for: return `null`, not `undefined`, where there is nothing. A transform reads
+    one way only, so an output takes none.
+  - **Handler:** `handle(input, { read, height, hash })`. Every answer is read at one committed height, `height`, whose
+    block hash is `hash` (`0x` hex text). Before the first block commits, the route answers 503 `no-committed-height` without calling
+    you.
+  - **Errors:** throw `new RouteError(kind, code, message)` to refuse a request. `kind` says what went wrong in terms
+    every transport has; `code` is your own, for a client to match. It is answered `{ "error": { "code", "message" } }`.
+
+    | `kind` | For | HTTP |
+    |---|---|---|
+    | `invalid-argument` | an input that is wrong whatever the chain holds | 400 |
+    | `not-found` | what the input names does not exist at the height read | 404 |
+    | `out-of-range` | an input past what exists (a height above the committed one) | 400 |
+    | `failed-precondition` | a request the module's state cannot answer | 400 |
+    | `resource-exhausted` | a request for more than the route gives at once | 429 |
+    | `unimplemented` | an input the route does not handle | 501 |
+    | `unavailable` | a request the route cannot answer now and may later | 503 |
+
+  - **`http`** (optional) says how HTTP serves the route: `GET` or `POST`, and a path under `/<your-module-id>`.
+    Without it the route is `POST /<your-module-id>/<name>`.
+    - A `GET`'s input is its parameters, the query's and the path's (`:name`; the path's win). They arrive as text,
+      and UmbraDB reads each as the type its schema asks for: `?limit=5` is the number 5 for `z.int()`, and stays
+      `"5"` for `z.string()`. Where the schema takes text or a number (`"all"` or a count), the text wins if the
+      schema takes it. So a `GET`'s input is an object of text, numbers and booleans, and each path parameter
+      is one of its fields; a route whose input holds a list or an object is a `POST`.
+    - A `POST`'s input is its JSON body. Its path takes no parameter, and a query parameter sent with it is refused.
+  - **Answers** of your route (its output, a `RouteError`, a refused input) are ASCII-escaped JSON with the
+    chain-data headers (`X-Umbra-View`, `X-Umbra-Height`, `X-Umbra-Hash`) and headers that keep a browser from running
+    them. UmbraDB's own errors (404, 405, a body that is not JSON, 500, 504) carry neither.
+
+  For keyset pages, `pageCursor(schema)` gives `encode(value)` and `decode(text)`: the opaque `nextCursor` of a page
+  and its check (400 `invalid-request` for text that is not a value of `schema`). A cursor is a position, not a
+  permission: it is not signed, so check what a request may read wherever its cursor points.
+- **Raw HTTP handlers**, for what is HTTP by nature (a GraphQL endpoint, a file). No other transport serves them, and
+  the path, the status and the headers are yours. `api.http(method, path, handler)` takes `GET` or `POST` and a path of `/` and segments, each a literal
   (letters, digits and ``-._~!$&'()*+,;=@``) or a parameter `:name`; a literal wins over a parameter. The handler gets
   `{ params, body }` and a read handle: `params` holds the query's and the path's parameters (the path's win), and a
   `POST`'s `body` is its parsed JSON (integers beyond 2^53 as `bigint`). Two registrations of one method and path, by
@@ -766,10 +880,33 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { z } from "zod";
-import { answerChainData, coreEntry, defineConfig, defineModule, InMemoryBlockSource, startUmbraDB } from "umbradb";
+import {
+  coreEntry,
+  defineConfig,
+  defineModule,
+  defineRoute,
+  InMemoryBlockSource,
+  RouteError,
+  startUmbraDB,
+  uintText,
+} from "umbradb";
+
+// The module's route: the latest row. It names no transport; `http` says where HTTP serves it, under
+// /block-runtimes. uintText(64) is a bigint here and digits in a string to a client.
+const getLatest = defineRoute({
+  name: "getLatest",
+  input: z.object({}),
+  output: z.strictObject({ height: uintText(64), spec_version: z.int(), extrinsics: z.int() }),
+  http: { method: "GET", path: "/latest" },
+  async handle(_input, { read, height }) {
+    const [row] = await read.query("SELECT * FROM block_runtimes.rows WHERE height = $1", [height]);
+    if (row === undefined) throw new RouteError("not-found", "no-row", "no row at the committed height");
+    return { height: row.height as bigint, spec_version: row.spec_version as number, extrinsics: row.extrinsics as number };
+  },
+});
 
 // The module under test: for each height, the runtime version of its block and how many extrinsics it carried, and
-// one route that answers the latest row.
+// the route above.
 const blockRuntimes = defineModule({
   id: "block-runtimes",
   version: "1.0.0",
@@ -804,12 +941,7 @@ const blockRuntimes = defineModule({
       ]);
     },
     async "on-start-api"(_processContext, api) {
-      api.http("GET", "/block-runtimes/latest", async (_request, read) =>
-        answerChainData(read, async (view) => {
-          const [row] = await read.query("SELECT * FROM block_runtimes.rows WHERE height = $1", [view.height]);
-          return row === undefined ? { status: 404, body: { error: "no-row" } } : { status: 200, body: row };
-        }),
-      );
+      api.route(getLatest);
     },
   },
 });
