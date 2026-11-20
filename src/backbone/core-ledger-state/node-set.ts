@@ -21,16 +21,20 @@
  * reason `tables-inconsistent`, naming the check and the first such key in byte order: a backup is not written, a
  * restore rolls back, the exported `contentsHash` rejects.
  *
+ * The keys are held in `./key-collections.ts`' sharded sets and maps, and the node set is given as a row stream, so the
+ * content of a whole chain's ledger state (more node keys than one JavaScript `Set` holds) can be computed.
+ *
  * {@link LEDGER_NODE_TABLES} is the declaration a `ledger-state` table item carries for them. {@link NodeSetFault} is
  * the seam through which a negative control puts a fault into the content.
  */
 
 import { UmbraError } from "../../db/errors.js";
-import type { ContentFunction, TableContent } from "../../determinism/contents-hash.js";
+import type { ContentFunction, RowStream, TableContent } from "../../determinism/contents-hash.js";
 import type { ConsistentRead } from "../../determinism/module-tables.js";
 import { nodeKeys } from "../../ledger/node-key.js";
 import { childRefKeys } from "../../ledger/node-refs.js";
 import type { ContentDefinition } from "../../modules/declaration.js";
+import { bytesOfKey, hexOfKey, KeyMap, KeySet, type NodeKey, nodeKeyOf } from "./key-collections.js";
 import { NODES_TABLE, REF_COUNTS_TABLE, ROOT_COUNTS_TABLE, UNREFERENCED_TABLE } from "./sql.js";
 
 /** A check of the node tables, as `details.check` names it. */
@@ -52,22 +56,31 @@ export interface NodeSetOptions {
 /** The rows read per statement unless the contents hash gives its page size. */
 const DEFAULT_PAGE_SIZE = 1_000;
 
-const hexOf = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
-
-/** `ledger-refcount-invalid` (`tables-inconsistent`) for `check` and the key `key` (hex). */
-function inconsistent(check: NodeTableCheck, key: string, message: string): UmbraError {
+/** `ledger-refcount-invalid` (`tables-inconsistent`) for `check` and the key `key`. */
+function inconsistent(check: NodeTableCheck, key: NodeKey, message: string): UmbraError {
   return new UmbraError(
     "ledger-refcount-invalid",
     `the ledger's node tables are inconsistent: ${message} (tables-inconsistent, ${check})`,
-    { reason: "tables-inconsistent", check, key: `0x${key}` },
+    { reason: "tables-inconsistent", check, key: `0x${hexOfKey(key)}` },
   );
 }
 
-/** The first of `keys` in byte order (hex in lowercase sorts as the bytes do), or undefined. */
-function first(keys: Iterable<string>): string | undefined {
-  let found: string | undefined;
+/** The first of `keys` in byte order, or undefined. */
+function first(keys: Iterable<NodeKey>): NodeKey | undefined {
+  let found: NodeKey | undefined;
   for (const key of keys) if (found === undefined || key < found) found = key;
   return found;
+}
+
+/** The keys of `keys` that `keep` keeps, as they come. */
+function* filtered(keys: Iterable<NodeKey>, keep: (key: NodeKey) => boolean): IterableIterator<NodeKey> {
+  for (const key of keys) if (keep(key)) yield key;
+}
+
+/** The keys of `a`, then those of `b`. */
+function* concat(a: Iterable<NodeKey>, b: Iterable<NodeKey>): IterableIterator<NodeKey> {
+  yield* a;
+  yield* b;
 }
 
 /**
@@ -94,6 +107,10 @@ async function* keyOrdered(
 
 /**
  * The content function of `nodes`, `ref_counts` and `unreferenced` (see the module comment), with `options`' fault.
+ *
+ * A whole chain's ledger state holds more node keys than one JavaScript `Set` or `Map` can (2^24), so the keys are
+ * held in {@link KeySet}s and {@link KeyMap}s, and the node set is given as a {@link RowStream}, encoded key by key
+ * rather than built as one array.
  */
 export function nodeTablesContent(options: NodeSetOptions = {}): ContentFunction {
   return async (read, page) => {
@@ -101,11 +118,11 @@ export function nodeTablesContent(options: NodeSetOptions = {}): ContentFunction
     if (!Number.isSafeInteger(pageSize) || pageSize < 1) {
       throw new RangeError(`pageSize must be a positive integer, got ${pageSize}`);
     }
-    const rows = new Set<string>();
-    const nodeSet = new Set<string>();
-    const refs = new Map<string, number>();
+    const rows = new KeySet();
+    const nodeSet = new KeySet();
+    const refs = new KeyMap<number>();
     for await (const row of keyOrdered(read, NODES_TABLE, "node_key, data, children", pageSize)) {
-      const key = hexOf(row.node_key as Uint8Array);
+      const key = nodeKeyOf(row.node_key as Uint8Array);
       const data = row.data as Uint8Array;
       const children = row.children as Uint8Array;
       let computed: ReturnType<typeof nodeKeys>;
@@ -113,38 +130,52 @@ export function nodeTablesContent(options: NodeSetOptions = {}): ContentFunction
         computed = nodeKeys(data, children);
       } catch (cause) {
         const why = cause instanceof Error ? cause.message : String(cause);
-        throw inconsistent("node-key", key, `the stored node 0x${key} cannot be hashed: ${why}`);
+        throw inconsistent("node-key", key, `the stored node 0x${hexOfKey(key)} cannot be hashed: ${why}`);
       }
-      const own = hexOf(computed.key);
+      const own = nodeKeyOf(computed.key);
       if (own !== key && options.fault !== "no-key-check") {
-        throw inconsistent("node-key", key, `the stored node 0x${key} has the content of the node 0x${own}`);
+        throw inconsistent(
+          "node-key",
+          key,
+          `the stored node 0x${hexOfKey(key)} has the content of the node 0x${hexOfKey(own)}`,
+        );
       }
       rows.add(key);
       nodeSet.add(key);
-      for (const embedded of computed.embedded) nodeSet.add(hexOf(embedded));
+      for (const embedded of computed.embedded) nodeSet.add(nodeKeyOf(embedded));
       for (const ref of childRefKeys(children)) {
-        const referenced = hexOf(ref);
+        const referenced = nodeKeyOf(ref);
         refs.set(referenced, (refs.get(referenced) ?? 0) + 1);
       }
     }
 
-    const dangling = first([...refs.keys()].filter((key) => !rows.has(key)));
+    const dangling = first(filtered(refs.keys(), (key) => !rows.has(key)));
     if (dangling !== undefined) {
-      throw inconsistent("closure", dangling, `0x${dangling} is referenced by a stored node's child list and is no stored node`);
+      throw inconsistent(
+        "closure",
+        dangling,
+        `0x${hexOfKey(dangling)} is referenced by a stored node's child list and is no stored node`,
+      );
     }
-    const roots = new Set<string>();
-    for await (const row of keyOrdered(read, ROOT_COUNTS_TABLE, "node_key", pageSize)) roots.add(hexOf(row.node_key as Uint8Array));
-    const rootless = first([...roots].filter((key) => !rows.has(key)));
+    const roots = new KeySet();
+    for await (const row of keyOrdered(read, ROOT_COUNTS_TABLE, "node_key", pageSize)) {
+      roots.add(nodeKeyOf(row.node_key as Uint8Array));
+    }
+    const rootless = first(filtered(roots.keys(), (key) => !rows.has(key)));
     if (rootless !== undefined) {
-      throw inconsistent("roots", rootless, `0x${rootless} has a root count and is no stored node`);
+      throw inconsistent("roots", rootless, `0x${hexOfKey(rootless)} has a root count and is no stored node`);
     }
 
-    const counted = new Map<string, number>();
+    const counted = new KeyMap<number>();
     for await (const row of keyOrdered(read, REF_COUNTS_TABLE, "node_key, count", pageSize)) {
-      counted.set(hexOf(row.node_key as Uint8Array), Number(row.count));
+      counted.set(nodeKeyOf(row.node_key as Uint8Array), Number(row.count));
     }
+    // Every key either side holds, once: the referenced keys, then the counted ones no reference names.
     const miscounted = first(
-      [...new Set([...refs.keys(), ...counted.keys()])].filter((key) => (refs.get(key) ?? 0) !== (counted.get(key) ?? 0)),
+      filtered(
+        concat(refs.keys(), filtered(counted.keys(), (key) => !refs.has(key))),
+        (key) => (refs.get(key) ?? 0) !== (counted.get(key) ?? 0),
+      ),
     );
     if (miscounted !== undefined) {
       const holds = counted.get(miscounted) ?? 0;
@@ -152,27 +183,40 @@ export function nodeTablesContent(options: NodeSetOptions = {}): ContentFunction
       throw inconsistent(
         "counts",
         miscounted,
-        `${REF_COUNTS_TABLE} holds ${holds} for 0x${miscounted}, where the stored child lists reference it ${given} times`,
+        `${REF_COUNTS_TABLE} holds ${holds} for 0x${hexOfKey(miscounted)}, where the stored child lists reference it ${given} times`,
       );
     }
 
-    const queued = new Set<string>();
+    const queued = new KeySet();
     for await (const row of keyOrdered(read, UNREFERENCED_TABLE, "node_key", pageSize)) {
-      queued.add(hexOf(row.node_key as Uint8Array));
+      queued.add(nodeKeyOf(row.node_key as Uint8Array));
     }
-    const owed = (key: string): boolean => rows.has(key) && !refs.has(key) && !roots.has(key);
-    const misqueued = first([...new Set([...rows, ...queued])].filter((key) => queued.has(key) !== owed(key)));
+    const owed = (key: NodeKey): boolean => rows.has(key) && !refs.has(key) && !roots.has(key);
+    // Every row and every queued key, once: the rows, then the queued keys that are no row.
+    const misqueued = first(
+      filtered(
+        concat(rows.keys(), filtered(queued.keys(), (key) => !rows.has(key))),
+        (key) => queued.has(key) !== owed(key),
+      ),
+    );
     if (misqueued !== undefined) {
+      const named = hexOfKey(misqueued);
       const why = queued.has(misqueued)
-        ? `${UNREFERENCED_TABLE} holds 0x${misqueued}, which is ${rows.has(misqueued) ? "referenced or persisted" : "no stored node"}`
-        : `${UNREFERENCED_TABLE} lacks 0x${misqueued}, a stored node with neither a reference nor a root count`;
+        ? `${UNREFERENCED_TABLE} holds 0x${named}, which is ${rows.has(misqueued) ? "referenced or persisted" : "no stored node"}`
+        : `${UNREFERENCED_TABLE} lacks 0x${named}, a stored node with neither a reference nor a root count`;
       throw inconsistent("queue", misqueued, why);
     }
 
-    const keys = options.fault === "constant-node-set" ? [] : [...nodeSet].sort();
+    const constant = options.fault === "constant-node-set";
     const nodes: TableContent = {
       columns: [{ name: "node_key", type: "bytea" }],
-      rows: keys.map((key) => [Uint8Array.from(Buffer.from(key, "hex"))]),
+      rows: {
+        count: constant ? 0 : nodeSet.size,
+        *[Symbol.iterator]() {
+          if (constant) return;
+          for (const key of nodeSet.sorted()) yield [bytesOfKey(key)];
+        },
+      },
     };
     return new Map<string, TableContent | null>([
       ["nodes", nodes],

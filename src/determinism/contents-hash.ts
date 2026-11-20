@@ -33,8 +33,17 @@ import {
 export interface TableContent {
   /** The columns, by the names the hash records and the column types the canonical encoding takes for them. */
   readonly columns: readonly { readonly name: string; readonly type: ColumnType }[];
-  /** Each row's values, in column order. */
-  readonly rows: readonly (readonly unknown[])[];
+  /**
+   * Each row's values, in column order: an array, or a {@link RowStream} for a table too large to hold as one (a whole
+   * chain's ledger node set), whose rows are encoded as they are given.
+   */
+  readonly rows: readonly (readonly unknown[])[] | RowStream;
+}
+
+/** Rows given one at a time, read once, with their number, which the hash writes before them. */
+export interface RowStream extends Iterable<readonly unknown[]> {
+  /** How many rows the iteration gives; a different number fails the computation. */
+  readonly count: number;
 }
 
 /**
@@ -148,9 +157,17 @@ function hashContent(
     return;
   }
   hash.update(encodeCanonical(given.columns.map((column) => column.name)));
-  hash.update(encodeArrayHead(given.rows.length));
+  const count = Array.isArray(given.rows) ? given.rows.length : (given.rows as RowStream).count;
+  hash.update(encodeArrayHead(count));
   const types = given.columns.map((column) => column.type);
-  for (const row of given.rows) hash.update(encodeRow(row, types));
+  let rows = 0;
+  for (const row of given.rows) {
+    hash.update(encodeRow(row, types));
+    rows++;
+  }
+  if (rows !== count) {
+    throw new Error(`the content of ${table.schema}.${table.name} counted ${count} rows and gave ${rows}`);
+  }
 }
 
 /**

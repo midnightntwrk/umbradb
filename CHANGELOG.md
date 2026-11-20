@@ -71,6 +71,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 - The tape node answers JSON-RPC batch frames (`batches: false` keeps the old −32600 refusal). The tape recorder still
   takes no batches: record with `nodeBatchBlocks: 1`.
 
+### Fixed
+
+- A backup or restore of a database whose ledger state holds more than 2^24 node keys (stored and embedded; Preprod
+  at height 3.5 million) no longer fails with `RangeError: Set maximum size exceeded`: the contents hash of
+  `core-ledger-state`'s node tables holds the keys in sets sharded by their first byte and hashes the node set key by
+  key. The contents hash is unchanged.
+
 ## [0.10.0] - 2026-10-27
 
 ### Breaking changes
