@@ -21,6 +21,11 @@ import { STAGENET } from "./v9-rc3-checks.js";
  * The adapters' `stateSummary` gives all six, none null, as plain data, also for a state loaded from its stored nodes
  * in a fresh worker.
  *
+ * The roots are Poseidon hashes (`MerkleTree::rehash`), and the oracle is built against an unpatched checkout, so this
+ * is also the check, in the four packages, that their patched `midnight-circuits` (`vendor/ledger/<version>/crates/`,
+ * which keeps the Poseidon pre-computation between hashes) hashes as the unpatched crate does: the first hash in a
+ * fresh module, and the hashes after it, which by the patch's source take a kept copy.
+ *
  * The stored rows (`core_ledger_state.states`, none null at every height) are tested in `test/backbone/`, over the
  * recorded tape ranges from genesis. The rebuilt packages' `SHA256SUMS` are tested in `vendored-ledger-files.test.ts`
  * and `package-identity.test.ts`.

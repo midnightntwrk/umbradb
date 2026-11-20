@@ -1,0 +1,26 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 1229edb..20fe22c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2833,8 +2833,6 @@ dependencies = [
+ [[package]]
+ name = "midnight-circuits"
+ version = "6.1.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "600f93b06229da9f000d5cb7649ef2d8e3f8058f2eae640b15a3a1d6dd29313b"
+ dependencies = [
+  "base64 0.13.1",
+  "blake2b_halo2",
+diff --git a/Cargo.toml b/Cargo.toml
+index b9630b5..17acd78 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -65,3 +65,8 @@ panic = "abort"
+ 
+ [workspace.metadata.spellcheck]
+ config = ".spellcheck/cargo-spellcheck.toml"
++
++# (UmbraDB) midnight-circuits with its Poseidon pre-computation kept between hashes: the crate's source at this
++# version, with the build's own patch applied (`vendor/ledger/build-in-container.sh`, the version's `crates/`).
++[patch.crates-io]
++midnight-circuits = { path = "/build/crates/midnight-circuits-6.1.0" }

@@ -1,0 +1,39 @@
+diff --git a/src/hash/poseidon/poseidon_cpu.rs b/src/hash/poseidon/poseidon_cpu.rs
+index 86d1b23..447ac1b 100644
+--- a/src/hash/poseidon/poseidon_cpu.rs
++++ b/src/hash/poseidon/poseidon_cpu.rs
+@@ -129,7 +129,9 @@ impl<F: PoseidonField> SpongeCPU<F, F> for PoseidonChip<F> {
+     fn init(input_len: Option<usize>) -> Self::StateCPU {
+         let mut register = [F::ZERO; WIDTH];
+         register[RATE] = F::from_u128(input_len.map(|l| l as u128).unwrap_or(1 << 64));
+-        let pre_computed = PreComputedRoundCPU::init();
++        // (UmbraDB) The pre-computation depends on the field only: one copy per field type is kept, where every hash
++        // computed it again (`kept_pre_computed`, below).
++        let pre_computed = kept_pre_computed::<F>();
+         PoseidonState {
+             pre_computed,
+             register,
+@@ -312,3 +314,23 @@ mod tests {
+         consistency_cpu::<midnight_curves::Fq>(1);
+     }
+ }
++
++/// (UmbraDB) `PreComputedRoundCPU::init()` for the field `F`, computed once per thread and field type and copied
++/// from then on. It is a function of the field's parameters alone, so every hash gets the value it computed itself
++/// before.
++fn kept_pre_computed<F: PoseidonField>() -> PreComputedRoundCPU<F> {
++    use std::any::{Any, TypeId};
++    use std::cell::RefCell;
++    use std::collections::HashMap;
++    thread_local! {
++        static KEPT: RefCell<HashMap<TypeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
++    }
++    KEPT.with(|kept| {
++        let mut kept = kept.borrow_mut();
++        *kept
++            .entry(TypeId::of::<F>())
++            .or_insert_with(|| Box::new(PreComputedRoundCPU::<F>::init()))
++            .downcast_ref::<PreComputedRoundCPU<F>>()
++            .expect("one pre-computation per field type")
++    })
++}
