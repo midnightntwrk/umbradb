@@ -1602,6 +1602,237 @@ describe("call counts per method (FR-015 of the node call budget)", () => {
   });
 });
 
+describe("batches: the calls made in one turn in one frame (FR-016–FR-019 of the node call budget)", () => {
+  it("sends one turn's calls as one batch frame, pairs the answers by id in any order, and counts a frame per method", async () => {
+    const node = await startNode();
+    node.on("chain_getBlockHash", (params) => ({ result: hash(Number(params[0])) }));
+    node.reverseBatches = true;
+    const c = client(node.url(), { batchSize: 8 });
+    const [one, two, three, header] = await Promise.all([c.blockHash(1n), c.blockHash(2n), c.blockHash(3n), c.header(AT)]);
+    expect([hex(one), hex(two), hex(three)]).toEqual([hash(1), hash(2), hash(3)]);
+    expect(header.number).toBe(BigInt((recorded("chain_getHeader").result as { number: string }).number));
+    expect(node.batchFrames).toBe(1);
+    expect(node.received.map((request) => [request.method, request.batch])).toEqual([
+      ["chain_getBlockHash", 1],
+      ["chain_getBlockHash", 1],
+      ["chain_getBlockHash", 1],
+      ["chain_getHeader", 1],
+    ]);
+    expect(c.calls).toEqual({
+      chain_getBlockHash: { calls: 3, attempts: 3, frames: 1, failures: {} },
+      chain_getHeader: { calls: 1, attempts: 1, frames: 1, failures: {} },
+    });
+    expect(c.frames).toBe(1);
+  });
+
+  it("sends a call made alone in its turn in a frame of its own, and a turn's calls in frames of at most batchSize", async () => {
+    const node = await startNode();
+    node.on("chain_getBlockHash", (params) => ({ result: hash(Number(params[0])) }));
+    const c = client(node.url(), { batchSize: 3 });
+    const hashes = await Promise.all([1, 2, 3, 4, 5, 6, 7].map((n) => c.blockHash(BigInt(n))));
+    expect(hashes.map(hex)).toEqual([1, 2, 3, 4, 5, 6, 7].map(hash));
+    // Two full batches leave at once; the seventh call leaves alone at the next turn.
+    expect(node.batchFrames).toBe(2);
+    expect(node.received.map((request) => request.batch)).toEqual([1, 1, 1, 2, 2, 2, undefined]);
+    await c.blockHash(8n);
+    expect(node.received.at(-1)?.batch).toBeUndefined();
+    expect(c.calls).toEqual({ chain_getBlockHash: { calls: 8, attempts: 8, frames: 4, failures: {} } });
+    expect(c.frames).toBe(4);
+  });
+
+  it("with batchSize 1, the default, sends every call in a frame of its own, as before", async () => {
+    const node = await startNode();
+    node.on("chain_getBlockHash", (params) => ({ result: hash(Number(params[0])) }));
+    const c = client(node.url());
+    await Promise.all([1, 2, 3].map((n) => c.blockHash(BigInt(n))));
+    expect(node.batchFrames).toBe(0);
+    expect(c.calls).toEqual({ chain_getBlockHash: { calls: 3, attempts: 3, frames: 3, failures: {} } });
+  });
+
+  it("keeps each call's own failure in a batch: the others are used as answered, a retryable one is tried again alone", async () => {
+    const node = await startNode();
+    const tries = new Map<number, number>();
+    node.on("chain_getBlockHash", (params) => {
+      const n = Number(params[0]);
+      const tried = (tries.get(n) ?? 0) + 1;
+      tries.set(n, tried);
+      if (n === 2 && tried === 1) return { error: { code: -32999, message: "RPC rate limit exceeded" } };
+      if (n === 3 && tried === 1) return { silent: true };
+      if (n === 4) return { error: { code: -32999, message: "RPC rate limit exceeded" } };
+      return { result: hash(n) };
+    });
+    node.on("midnight_ledgerStateRoot", () => ({ error: { code: -32000, message: "anything else" } }));
+    const timers = new ManualTimers();
+    const c = client(node.url(), { timers, callTimeoutMs: 5_000, batchSize: 8 });
+    const one = c.blockHash(1n);
+    const two = c.blockHash(2n);
+    const three = c.blockHash(3n);
+    const root = umbra(c.ledgerStateRoot(AT));
+    const once = umbra(c.blockHash(4n, { retry: false }));
+    expect(hex(await one)).toBe(hash(1));
+    expect((await root).code).toBe("node-error");
+    expect((await once).code).toBe("node-unreachable");
+    expect(node.batchFrames).toBe(1);
+    // The rate-limited call is tried again alone after its 1 s back-off; the silent one times out alone at 5 s.
+    await timers.advance(1_000);
+    expect(hex(await two)).toBe(hash(2));
+    await timers.advance(5_000);
+    expect(hex(await three)).toBe(hash(3));
+    expect(node.batchFrames).toBe(1);
+    const which = (request: (typeof node.received)[number]) =>
+      request.method === "chain_getBlockHash" ? Number((request.params as unknown[])[0]) : "root";
+    expect(node.received.map((request) => [which(request), request.batch])).toEqual([
+      [1, 1],
+      [2, 1],
+      [3, 1],
+      ["root", 1],
+      [4, 1],
+      [2, undefined],
+      [3, undefined],
+    ]);
+    expect(c.batchesRefused).toBe(false);
+    expect(c.calls).toEqual({
+      chain_getBlockHash: { calls: 4, attempts: 6, frames: 3, failures: { "node-unreachable": 1 } },
+      midnight_ledgerStateRoot: { calls: 1, attempts: 1, frames: 1, failures: { "node-error": 1 } },
+    });
+  });
+
+  it("falls back to single calls when the node refuses a batch (an error with a null id), reported once", async () => {
+    const node = await startNode();
+    node.on("chain_getBlockHash", (params) => ({ result: hash(Number(params[0])) }));
+    node.batches = "refuse";
+    const timers = new ManualTimers();
+    let refusals = 0;
+    const retries: NodeRetry[] = [];
+    const c = client(node.url(), {
+      timers,
+      batchSize: 8,
+      onBatchRefused: () => refusals++,
+      onRetry: (retry) => retries.push(retry),
+    });
+    const first = Promise.all([1, 2, 3].map((n) => c.blockHash(BigInt(n))));
+    await until(() => retries.length === 3, "the refused batch's calls to be retried");
+    expect(retries.map((retry) => [retry.attempt, retry.delayMs, retry.error.details.reason])).toEqual([
+      [1, 1_000, "batch-refused"],
+      [1, 1_000, "batch-refused"],
+      [1, 1_000, "batch-refused"],
+    ]);
+    expect(c.batchesRefused).toBe(true);
+    expect(refusals).toBe(1);
+    await timers.advance(1_000);
+    expect((await first).map(hex)).toEqual([hash(1), hash(2), hash(3)]);
+    // Calls made together on this connection now go alone.
+    await Promise.all([4, 5].map((n) => c.blockHash(BigInt(n))));
+    expect(node.batchFrames).toBe(1);
+    expect(node.received.map((request) => request.batch)).toEqual([1, 1, 1, undefined, undefined, undefined, undefined, undefined]);
+    expect(c.calls).toEqual({ chain_getBlockHash: { calls: 5, attempts: 8, frames: 6, failures: {} } });
+    // The next connection tries batches again, and the node now takes them; the refusal was reported once.
+    node.batches = "answer";
+    node.drop();
+    await until(() => c.connection === "retrying", "the connection to be lost");
+    await timers.advance(1_000);
+    await until(() => c.connection === "connected", "the next connection");
+    expect(c.batchesRefused).toBe(false);
+    await Promise.all([6, 7].map((n) => c.blockHash(BigInt(n))));
+    expect(node.batchFrames).toBe(2);
+    expect(refusals).toBe(1);
+  });
+
+  it("falls back to single calls when the node answers no call of a batch within the timeout", async () => {
+    const node = await startNode();
+    node.on("chain_getBlockHash", (params) => ({ result: hash(Number(params[0])) }));
+    node.batches = "silent";
+    const timers = new ManualTimers();
+    let refusals = 0;
+    const c = client(node.url(), { timers, callTimeoutMs: 5_000, batchSize: 8, onBatchRefused: () => refusals++ });
+    const both = Promise.all([c.blockHash(1n), c.blockHash(2n, { timeoutMs: 20_000 })]);
+    await until(() => node.received.length === 2, "the batch");
+    await timers.advance(4_999);
+    expect(c.batchesRefused).toBe(false);
+    // The first call's timeout fails both: the second, sent in the same unanswered batch, is refused with it.
+    await timers.advance(1);
+    expect(c.batchesRefused).toBe(true);
+    expect(refusals).toBe(1);
+    await timers.advance(1_000);
+    expect((await both).map(hex)).toEqual([hash(1), hash(2)]);
+    expect(node.received.map((request) => request.batch)).toEqual([1, 1, undefined, undefined]);
+    expect(c.calls).toEqual({ chain_getBlockHash: { calls: 2, attempts: 4, frames: 3, failures: {} } });
+  });
+
+  it("keeps batches on when a batch's answer leaves one call out: that call times out alone", async () => {
+    const node = await startNode();
+    let silent = true;
+    node.on("chain_getBlockHash", (params) => (Number(params[0]) === 2 && silent ? { silent: true } : { result: hash(Number(params[0])) }));
+    const timers = new ManualTimers();
+    const c = client(node.url(), { timers, callTimeoutMs: 5_000, batchSize: 8 });
+    const one = c.blockHash(1n);
+    const two = c.blockHash(2n);
+    expect(hex(await one)).toBe(hash(1));
+    silent = false;
+    await timers.advance(5_000 + 1_000);
+    expect(hex(await two)).toBe(hash(2));
+    expect(c.batchesRefused).toBe(false);
+  });
+
+  it("never batches a subscription, also when made again together after a reconnect", async () => {
+    const node = await startNode();
+    const timers = new ManualTimers();
+    const retries: NodeRetry[] = [];
+    const c = client(node.url(), { timers, batchSize: 8, onRetry: (retry) => retries.push(retry) });
+    let restarted = 0;
+    await c.subscribeNewHeads({ header: () => undefined, restarted: () => restarted++ });
+    await c.subscribeFinalizedHeads({ header: () => undefined, restarted: () => restarted++ });
+    node.drop();
+    await until(() => retries.length === 1, "the reconnect to be scheduled");
+    await timers.advance(1_000);
+    await until(() => restarted === 2, "both subscriptions made again");
+    expect(node.batchFrames).toBe(0);
+    expect(node.received).toHaveLength(4);
+  });
+
+  it("sends nothing for a call aborted in the turn it was made, and fails a batch answer of the wrong shape as a bad frame", async () => {
+    const scripted = scriptedSockets();
+    const c = client("ws://node.invalid", { connect: scripted.connect, timers: scripted.timers, batchSize: 8 });
+    const socket = await (async () => {
+      const head = c.finalizedHead();
+      const first = await scripted.next();
+      first.events.open();
+      await turns();
+      const request = JSON.parse(first.sent[0] as string) as { id: number };
+      first.events.message(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: MAINNET_BLOCK }));
+      await head;
+      return first;
+    })();
+    const controller = new AbortController();
+    const aborted = caught(c.blockHash(1n, { signal: controller.signal }));
+    const kept = c.blockHash(2n, { retry: false });
+    controller.abort(new Error("the run ended"));
+    await aborted;
+    await turns();
+    // Only the call left goes, alone: no batch of one.
+    expect(socket.sent.slice(1).map((text) => JSON.parse(text) as { method: string; params: unknown[] })).toMatchObject([
+      { method: "chain_getBlockHash", params: [2] },
+    ]);
+    const third = umbra(c.blockHash(3n, { retry: false }));
+    const fourth = umbra(c.blockHash(4n, { retry: false }));
+    await turns();
+    expect(Array.isArray(JSON.parse(socket.sent[2] as string))).toBe(true);
+    socket.events.message("[1]");
+    expect((await third).details.reason).toBe("bad-answer");
+    expect((await fourth).details.reason).toBe("bad-answer");
+    expect((await umbra(kept)).details.reason).toBe("bad-answer");
+    expect(c.calls.chain_getBlockHash).toEqual({ calls: 4, attempts: 3, frames: 2, failures: { aborted: 1, "node-error": 3 } });
+  });
+
+  it("refuses a batchSize that is not a positive integer", () => {
+    for (const batchSize of [0, -1, 1.5, Number.NaN]) {
+      expect(() => new NodeClient({ url: "ws://node.invalid", batchSize })).toThrow(
+        expect.objectContaining({ code: "invalid-configuration", details: { field: "batchSize", reason: "not-a-positive-integer" } }),
+      );
+    }
+  });
+});
+
 describe("the allowed node methods over the suite", () => {
   it("sent the fake nodes nothing but the allowed node methods, in every test above (run last)", () => {
     expect(outsideNodeMethods(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);

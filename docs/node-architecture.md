@@ -57,8 +57,10 @@ For each new finalized head, `on-finalized` runs once, before the head's heights
 loop processes every height from the cursor + 1 to the head, one at a time:
 
 1. **`on-fetch`, `on-parse`**: the block's items. A height the prefetch prepared (up to `prefetchWindow` heights ahead,
-   eight at a time) or a queued best block with the finalized hash goes on with the items it already has; a queued
-   block with another hash is dropped (`on-rollback`) and the finalized one fetched.
+   eight at a time, or `nodeBatchBlocks` when more; during a catch-up begun in groups of `nodeBatchBlocks`, whose calls
+   the node client sends together as JSON-RPC batch frames) or a queued best block with the finalized hash goes on
+   with the items it already has; a queued block with another hash is dropped (`on-rollback`) and the finalized one
+   fetched.
 2. **`on-start-height`**: only at the height where a module's entry starts.
 3. **`on-compute`**: reads the state at h − 1, outside any transaction; modules that do not depend on one another run
    at the same time. Compute here.

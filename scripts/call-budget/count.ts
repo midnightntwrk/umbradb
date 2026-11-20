@@ -34,10 +34,12 @@
  * `chain_getBlockHash` answers and its headers). Outcomes other than `answered` and `subscribed` (a `not-on-tape`, a
  * repeat) are listed too.
  *
- * The node client sends single calls only today: one request is one frame, and a retry is a new request, so these are
- * also the frames the node received. Beside the log, the script reads the process's node client's own counts
- * (`NodeClient.calls`, `src/node/counts.ts`, what `/status` shows as `node.calls`) once the run stopped, and prints
- * whether each method's attempts equal the requests the tape node logged for it.
+ * A retry is a new request. A request that came in a JSON-RPC batch frame is logged with the frame's number
+ * (`TapeCall.frame`), so the script also counts frames: per method, the frames that carried any of its requests (a
+ * request alone is a frame of its own), and in all, each frame once. Beside the log, the script reads the process's
+ * node client's own counts (`NodeClient.calls` and `NodeClient.frames`, `src/node/counts.ts`, what `/status` shows as
+ * `node.calls` and `node.batches.frames`) once the run stopped, and prints whether each method's attempts and frames
+ * equal those of the tape node's log, and the client's frames the log's.
  *
  * **What it stored.** After the process stopped, the script opens its PGlite database and takes every module table
  * (not PostgreSQL's own, `information_schema`, `public` or change capture's scratch schema) as the MD5 of its rows'
@@ -211,6 +213,8 @@ const settings = {
 
 interface Row {
   total: number;
+  /** The frames that carried this method's requests, by key (`b<frame>` for a batch, `s<index>` for a request alone). */
+  frames: Set<string>;
   inRange: number;
   belowStart: number;
   aboveStop: number;
@@ -245,10 +249,14 @@ try {
 
   const rows = new Map<string, Row>();
   const outcomes = new Map<string, number>();
-  for (const call of calls) {
+  const frames = new Set<string>();
+  for (const [index, call] of calls.entries()) {
     const method = call.method ?? "(not a request)";
-    const row = rows.get(method) ?? { total: 0, inRange: 0, belowStart: 0, aboveStop: 0, noBlock: 0 };
+    const row = rows.get(method) ?? { total: 0, frames: new Set(), inRange: 0, belowStart: 0, aboveStop: 0, noBlock: 0 };
     row.total += 1;
+    const frame = call.frame === undefined ? `s${index}` : `b${call.frame}`;
+    row.frames.add(frame);
+    frames.add(frame);
     const block = blockOf(call);
     if (block === null) row.noBlock += 1;
     else if (block < start) row.belowStart += 1;
@@ -261,7 +269,7 @@ try {
     }
   }
   const blocks = Number(stop - start + 1n);
-  const sum = (field: keyof Row): number => [...rows.values()].reduce((n, row) => n + row[field], 0);
+  const sum = (field: Exclude<keyof Row, "frames">): number => [...rows.values()].reduce((n, row) => n + row[field], 0);
   const perBlock = (n: number): string => (n / blocks).toFixed(3);
   const sorted = [...rows.entries()].sort(([a, x], [b, y]) => y.total - x.total || a.localeCompare(b));
 
@@ -271,29 +279,33 @@ try {
     `state ${status.state}, cursor ${status.cursor}, ${calls.length} requests on ${run.node.connections} connection(s), ` +
       `${seconds.toFixed(1)} s`,
     "",
-    "| Method | All | In range | Below start | Above stop | No block | In range per block |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Method | All | In range | Below start | Above stop | No block | In range per block | Frames | Frames per block |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const [method, row] of sorted) {
     out.push(
-      `| \`${method}\` | ${row.total} | ${row.inRange} | ${row.belowStart} | ${row.aboveStop} | ${row.noBlock} | ${perBlock(row.inRange)} |`,
+      `| \`${method}\` | ${row.total} | ${row.inRange} | ${row.belowStart} | ${row.aboveStop} | ${row.noBlock} | ` +
+        `${perBlock(row.inRange)} | ${row.frames.size} | ${perBlock(row.frames.size)} |`,
     );
   }
   out.push(
     `| **Total** | **${sum("total")}** | **${sum("inRange")}** | **${sum("belowStart")}** | **${sum("aboveStop")}** | ` +
-      `**${sum("noBlock")}** | **${perBlock(sum("inRange"))}** |`,
+      `**${sum("noBlock")}** | **${perBlock(sum("inRange"))}** | **${frames.size}** | **${perBlock(frames.size)}** |`,
     "",
-    `All requests per block: ${perBlock(sum("total"))}`,
+    `All requests per block: ${perBlock(sum("total"))}; frames per block: ${perBlock(frames.size)} (${frames.size} ` +
+      `frames, ${[...frames].filter((key) => key.startsWith("b")).length} of them batches)`,
   );
   if (outcomes.size > 0) {
     out.push(`Outcomes other than answered/subscribed: ${[...outcomes].map(([key, n]) => `${key} ×${n}`).join(", ")}`);
   }
   if (status.reason !== null) out.push(`Reason: ${JSON.stringify(status.reason, bigintText)}`);
-  // The client's own counts against the tape node's log: each method's attempts are the requests the node received.
+  // The client's own counts against the tape node's log: each method's attempts are the requests the node received,
+  // and its frames the frames that carried them.
   const counted = client?.calls ?? {};
-  const differ = [...new Set([...rows.keys(), ...Object.keys(counted)])].filter(
-    (method) => (counted as Record<string, { attempts: number } | undefined>)[method]?.attempts !== rows.get(method)?.total,
-  );
+  const differ = [...new Set([...rows.keys(), ...Object.keys(counted)])].filter((method) => {
+    const mine = (counted as Record<string, { attempts: number; frames: number } | undefined>)[method];
+    return mine?.attempts !== rows.get(method)?.total || mine?.frames !== rows.get(method)?.frames.size;
+  });
   const sumOf = (field: "calls" | "attempts" | "frames"): number =>
     Object.values(counted).reduce((n, counts) => n + (counts?.[field] ?? 0), 0);
   const failures = Object.values(counted).reduce(
@@ -301,8 +313,9 @@ try {
     0,
   );
   out.push(
-    `Node client's counts: ${sumOf("calls")} calls, ${sumOf("attempts")} attempts, ${sumOf("frames")} frames, ` +
-      `${failures} failed; attempts ${differ.length === 0 ? "equal the tape node's log for every method" : `differ from the log for ${differ.join(", ")}`}`,
+    `Node client's counts: ${sumOf("calls")} calls, ${sumOf("attempts")} attempts, ${sumOf("frames")} frames by method ` +
+      `(${client?.frames ?? 0} frames in all, the log's ${client?.frames === frames.size ? "too" : frames.size}), ` +
+      `${failures} failed; attempts and frames ${differ.length === 0 ? "equal the tape node's log for every method" : `differ from the log for ${differ.join(", ")}`}`,
   );
   const stored = await storedTables(db.setting.path);
   const fingerprint = createHash("sha256")
@@ -334,7 +347,9 @@ try {
       cursor: status.cursor === null ? null : `${status.cursor}`,
       connections: run.node.connections,
       seconds,
-      methods: Object.fromEntries(sorted),
+      methods: Object.fromEntries(sorted.map(([method, row]) => [method, { ...row, frames: row.frames.size }])),
+      frames: frames.size,
+      clientFrames: client?.frames ?? null,
       outcomes: Object.fromEntries(outcomes),
       client: counted,
       stored,

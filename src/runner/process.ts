@@ -1732,6 +1732,10 @@ class Process implements ProcessHandle {
       queueDepth: view?.queueDepth ?? null,
       calls: this.#nodeClient?.calls ?? null,
       lastRootMatch: view?.lastRootMatch ?? null,
+      batches:
+        this.#nodeClient === null || this.#nodeClient === undefined
+          ? null
+          : Object.freeze({ frames: this.#nodeClient.frames, refused: this.#nodeClient.batchesRefused }),
     });
   }
 
@@ -1930,6 +1934,12 @@ class Process implements ProcessHandle {
               },
               // `/status` shows a change of the connection at once: the heartbeat may be a second away.
               onConnectionChange: () => this.#admin.publish(),
+              // Once per client: its calls then go one per frame on that connection (`node.batches.refused`).
+              onBatchRefused: () =>
+                this.#log(
+                  "node refused a JSON-RPC batch (or answered none of one): its calls go one per frame on this " +
+                    "connection; nodeBatchBlocks: 1 sends no batches",
+                ),
             });
       const shared: SourceShared = {
         nodeClient: this.#nodeClient,

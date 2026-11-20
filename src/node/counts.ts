@@ -8,8 +8,11 @@
  *   counted once however often it is tried. A call refused before it is sent (a method outside the allowed calls, a
  *   parameter it cannot send, a closed client) is none. Notifications are not calls.
  * - `attempts`: the tries sent to the node, retries included. A try that finds no connection sends nothing and is none.
- * - `frames`: the request frames those tries went in. The client sends one call per frame, so `frames` is `attempts`;
- *   a batch, which would carry several calls in one frame, would make it smaller.
+ * - `frames`: the request frames those tries went in. A try sent alone is one frame, so without batches `frames` is
+ *   `attempts`. A JSON-RPC batch frame carries several tries (`./client.ts`, `batchSize`): it counts one attempt for each
+ *   call in it, and one frame for each method it carries, so a method's `frames` is the frames that carried any of its
+ *   tries. A batch that mixes methods is then counted under each of them: the sum over methods is more than the frames
+ *   sent, which {@link NodeCallCounter.frames} counts once each.
  * - `failures`: the calls that ended without an answer, after any retries, by the code they ended with — `aborted`
  *   for a call whose signal was aborted (a run that ended stops its prefetched roots this way), else the `UmbraError`'s
  *   code (`node-unreachable`, `node-error`, `node-requirement`, `handle-closed`), `other` for anything else. A call whose answer came and could not be read into its typed value
@@ -51,6 +54,7 @@ export function failureCode(error: unknown, aborted: boolean): string {
 /** A node client's counts (see the module comment). */
 export class NodeCallCounter {
   readonly #methods = new Map<NodeMethod, Counts>();
+  #frames = 0;
 
   #of(method: NodeMethod): Counts {
     let counts = this.#methods.get(method);
@@ -69,11 +73,25 @@ export class NodeCallCounter {
 
   /** A try of a call sent to the node in a frame of its own. */
   sent(method: NodeMethod): void {
-    const counts = this.#of(method);
-    counts.attempts += 1;
-    counts.frames += 1;
-    traceNode(method, "attempts");
-    traceNode(method, "frames");
+    this.sentBatch([method]);
+  }
+
+  /** The tries of `methods`' calls sent to the node in one frame: an attempt each, a frame for each method among them. */
+  sentBatch(methods: readonly NodeMethod[]): void {
+    this.#frames += 1;
+    for (const method of methods) {
+      this.#of(method).attempts += 1;
+      traceNode(method, "attempts");
+    }
+    for (const method of new Set(methods)) {
+      this.#of(method).frames += 1;
+      traceNode(method, "frames");
+    }
+  }
+
+  /** The request frames sent, each once whatever it carried. */
+  get frames(): number {
+    return this.#frames;
   }
 
   /** A call ended without an answer, with `code`. */

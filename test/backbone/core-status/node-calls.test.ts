@@ -11,7 +11,8 @@ import { committed, ingest, PATIENCE_MS } from "../ingest-harness.js";
 /**
  * `/status`'s `node.calls` (FR-015 of the node call budget): a core synced over a tape node from S = 1 to its stop 6
  * shows, per method it asked, the calls, tries and frames the tape node received — the counters' totals are the tape
- * node's call log's — and no failure; a method it never asked is absent. Every body read validates against
+ * node's call log's, a batch frame counted under each method it carried — and no failure; a method it never asked is
+ * absent; and `node.batches` the frames in all, each batch once, none refused. Every body read validates against
  * `./status.schema.json`.
  *
  * The counts are the node client's own and do not depend on the database, so the run is on PGlite only.
@@ -54,26 +55,40 @@ describe("the node's call counts on /status", () => {
     });
     try {
       await committed(run, STOP);
-      // The tape node's log, per method: every request it received.
+      // The tape node's log, per method: every request it received, and the frames that carried them (a batch once).
       const logged = new Map<string, number>();
-      for (const call of run.node.calls) logged.set(call.method as string, (logged.get(call.method as string) ?? 0) + 1);
+      const framesOf = new Map<string, Set<string>>();
+      const frames = new Set<string>();
+      for (const [index, call] of run.node.calls.entries()) {
+        const method = call.method as string;
+        const frame = call.frame === undefined ? `s${index}` : `b${call.frame}`;
+        logged.set(method, (logged.get(method) ?? 0) + 1);
+        framesOf.set(method, (framesOf.get(method) ?? new Set()).add(frame));
+        frames.add(frame);
+      }
       const expected = Object.fromEntries(
-        [...logged].sort(([a], [b]) => a.localeCompare(b)).map(([method, n]) => [method, { calls: n, attempts: n, frames: n, failures: {} }]),
+        [...logged]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([method, n]) => [method, { calls: n, attempts: n, frames: framesOf.get(method)?.size, failures: {} }]),
       );
+      // With nodeBatchBlocks 8 (the default) some of the calls went in batches.
+      expect(run.node.batches).toBeGreaterThan(0);
       // The run asked the per-block methods and startup's, not a method of the ledger it does not run.
       expect(Object.keys(expected)).toEqual(expect.arrayContaining(["chain_getBlock", "chain_getBlockHash", "chain_subscribeFinalizedHeads", "state_getRuntimeVersion"]));
       expect(expected).not.toHaveProperty("midnight_ledgerStateRoot");
       expect((expected.chain_getBlock as { calls: number }).calls).toBe(Number(STOP));
       let shown: unknown;
+      let batches: unknown;
       const deadline = Date.now() + 30_000;
       for (;;) {
         const origin = admin.origin();
         if (origin !== null) {
           const answer = await ask(origin, "/status");
-          const body = answer.json as { node?: { calls?: unknown } } | undefined;
+          const body = answer.json as { node?: { calls?: unknown; batches?: unknown } } | undefined;
           if (answer.status === 200 && body !== undefined) {
             expect(STATUS_SCHEMA.problems(body)).toEqual([]);
             shown = body.node?.calls;
+            batches = body.node?.batches;
             if (JSON.stringify(shown) === JSON.stringify(expected)) break;
           }
         }
@@ -81,6 +96,7 @@ describe("the node's call counts on /status", () => {
         await sleep(50);
       }
       expect(shown).toEqual(expected);
+      expect(batches).toEqual({ frames: frames.size, refused: false });
       expect(Object.keys(shown as object).every((method) => (NODE_METHODS as readonly string[]).includes(method))).toBe(true);
       expect(run.handle.status().cursor).toBe(STOP);
     } finally {

@@ -27,8 +27,19 @@
  *   upgrade boundary), so nothing is asked of the node for a height the run will not process.
  *
  * It never fetches or holds more than `prefetchWindow` heights above the cursor, and prepares `concurrency` of them at a
- * time. For each height it takes the finalized hash, then takes the queued block of that hash if there is one, or else
- * runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner (`QueueRunner.prepare`).
+ * time (8, or `nodeBatchBlocks` when more). For each height it takes the finalized hash, then takes the queued block of
+ * that hash if there is one, or else runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner
+ * (`QueueRunner.prepare`).
+ *
+ * **Batches.** The prefetch makes the node calls of several heights at the same time, so that the node client, which
+ * sends the calls made in one turn as one JSON-RPC batch frame (`src/node/client.ts`, **Batches**), sends them in few
+ * frames. While the window's own bound limits it (not the head, nor the run's last height), the prefetch begins new
+ * heights in groups of `nodeBatchBlocks` (`batchBlocks`), not one at a time as the loop passes them: their hashes are
+ * then asked together, and once answered their blocks. A block is asked together with the calls its preparation will
+ * make: its chain events (`state_getStorage`, see below) once this run's `core-chain-events` asked for a block's events,
+ * and its ledger root when the roots' prefetch asks for it (see below). The best-block path asks a block's events with
+ * the block the same way. With `nodeBatchBlocks: 1` every height begins as soon as the window has room, and the client
+ * sends each call in a frame of its own.
  *
  * **The finalized hash of a height.** While the loop follows the head (the head no more than `prefetchWindow` above
  * the cursor), the source takes it without a node call when it knows it: each finalized notification and each head read
@@ -95,7 +106,9 @@
  *
  * **A block's chain events** ({@link NodeBlockSource.blockEvents}, `./events.ts`): `System::Events` read with
  * `state_getStorage` at the block's own hash, for `core-chain-events`, which decodes them. For a queued best block they
- * are read without retries, like its other calls.
+ * are read without retries, like its other calls. Once `core-chain-events` asked for a block's events in a run, each
+ * block fetched after it has its events asked with it (**Batches**), and `on-fetch` takes that answer; a block whose
+ * preparation then does not take them (the module no longer runs) ends this until it asks again.
  *
  * **The ledger's root and genesis state** ({@link NodeBlockSource.ledgerStateRoot}, {@link NodeBlockSource.genesisState},
  * `./ledger-source.ts`): `midnight_ledgerStateRoot` at a finalized block's hash and `system_properties.genesis_state`,
@@ -104,8 +117,9 @@
  *
  * **The roots' prefetch.** Once `core-ledger-state` has asked for a root in a run, the prefetch also asks for the root of
  * each finalized height it fetches itself (never a queued best block's) whose root `core-ledger-state` compares by the
- * height alone (block 0 and the multiples of `ledgerRootInterval`, as it tells the source: `rootsChecked`), in a slot of
- * its own after the block's take. A height compared for another reason (a run's first, a ledger or runtime change) is
+ * height alone (block 0 and the multiples of `ledgerRootInterval`, as it tells the source: `rootsChecked`), together
+ * with the block (**Batches**); the heights fetched before the first ask get theirs then, each in a slot of its own. A
+ * height compared for another reason (a run's first, a ledger or runtime change) is
  * asked at its `on-compute`, unprefetched; a height not compared is never asked.
  * `on-compute` then finds the answer waiting instead of paying the node's latency in every block. It is the same call,
  * with the same retries, at the same finalized hash, so its answer or its error is the one `on-compute` gets. It is kept
@@ -151,7 +165,15 @@ export interface NodeSourceOptions {
   readonly prefetchWindow: number;
   /** The queue's bound: the most best blocks queued (`tipCap`, 600 by default). */
   readonly tipCap: number;
-  /** How many heights the prefetch fetches at once; {@link DEFAULT_PREFETCH_CONCURRENCY} unless given. */
+  /**
+   * How many prefetched blocks' calls go to the node in one batch (`nodeBatchBlocks`, see the module comment,
+   * **Batches**): the prefetch begins heights in groups of this many; 1 unless given.
+   */
+  readonly batchBlocks?: number;
+  /**
+   * How many heights the prefetch fetches at once; {@link DEFAULT_PREFETCH_CONCURRENCY}, or `batchBlocks` when more,
+   * unless given.
+   */
   readonly concurrency?: number;
 }
 
@@ -159,6 +181,16 @@ export interface NodeSourceOptions {
 interface QueuedBlock {
   readonly block: BlockRef;
   readonly items: BlockItems;
+}
+
+/** A block being prepared (see `NodeBlockSource.#fetched`). */
+interface Fetched {
+  readonly node: NodeBlock;
+  readonly best: boolean;
+  /** Its events, asked with the block; undefined when they were not. */
+  readonly events: Promise<Uint8Array | null> | undefined;
+  /** Whether `blockEvents` took them. */
+  taken: boolean;
 }
 
 /** A finalized height the prefetch prepares. */
@@ -204,6 +236,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   protected readonly client: NodeClient;
   readonly #window: number;
   readonly #tipCap: number;
+  readonly #batchBlocks: number;
   readonly #concurrency: number;
 
   // ── the finalized head ──────────────────────────────────────────────────────────────────────────────────────────
@@ -252,8 +285,13 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   #best: bigint | null = null;
   /** The best head the node announced last, whatever the queue did with it (`/status`'s); null before any. */
   #announcedBest: bigint | null = null;
-  /** The blocks being prepared, by hash: what `core-block-fetch`'s `on-fetch` reads, and whether best (no retries). */
-  readonly #fetched = new Map<string, { readonly node: NodeBlock; readonly best: boolean }>();
+  /**
+   * The blocks being prepared, by hash: what `core-block-fetch`'s `on-fetch` reads, whether best (no retries), and the
+   * events asked with the block, if any, for `core-chain-events`' `on-fetch` (`blockEvents`).
+   */
+  readonly #fetched = new Map<string, Fetched>();
+  /** Whether a block's events were asked for in this run (`blockEvents`): only then are they asked with each block. */
+  #eventsWanted = false;
   /** The ledger roots the prefetch asked for, by hash, until the loop passes their height. */
   readonly #roots = new Map<string, { readonly height: bigint; readonly root: Promise<Uint8Array> }>();
   /** The finalized heights of this run the prefetch fetched itself (not taken from the queue): those whose root it may ask. */
@@ -276,7 +314,9 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     this.client = options.client;
     this.#window = positive(options.prefetchWindow, "prefetchWindow");
     this.#tipCap = positive(options.tipCap, "tipCap");
-    this.#concurrency = positive(options.concurrency ?? DEFAULT_PREFETCH_CONCURRENCY, "concurrency");
+    this.#batchBlocks = positive(options.batchBlocks ?? 1, "batchBlocks");
+    const concurrency = options.concurrency ?? Math.max(DEFAULT_PREFETCH_CONCURRENCY, this.#batchBlocks);
+    this.#concurrency = positive(concurrency, "concurrency");
     const client = options.client;
     this.#metadata = new RuntimeMetadata(client);
     this.#bestMetadata = new RuntimeMetadata({
@@ -450,8 +490,14 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
    * (`./events.ts`). A best block's are read without retries. Null when the state holds no value there.
    */
   async blockEvents(block: BlockRef): Promise<Uint8Array | null> {
-    const best = this.#fetched.get(hexOf(block.hash))?.best ?? false;
-    return this.client.storage(systemEventsKey(), block.hash, best ? { retry: false } : undefined);
+    const fetched = this.#fetched.get(hexOf(block.hash));
+    // From now on in this run, each block's events are asked with it (see the module comment, **Batches**).
+    if (this.#runner !== undefined) this.#eventsWanted = true;
+    if (fetched?.events !== undefined) {
+      fetched.taken = true;
+      return fetched.events;
+    }
+    return this.client.storage(systemEventsKey(), block.hash, fetched?.best === true ? { retry: false } : undefined);
   }
 
   /**
@@ -691,6 +737,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     this.#roots.clear();
     this.#fetchedFinalized.clear();
     this.#rootsWanted = false;
+    this.#eventsWanted = false;
     this.#lastTake = Promise.resolve();
     this.#queue = [];
     this.#best = null;
@@ -704,7 +751,13 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     const last = this.#runner.lastHeight ?? null;
     const window = this.windowEnd(this.#cursor, announced);
     const end = last !== null && last < window ? last : window;
-    for (let height = this.#cursor + 1n; height <= end; height++) if (!this.#prefetch.has(height)) this.#begin(height);
+    let next = this.#cursor + 1n;
+    while (next <= end && this.#prefetch.has(next)) next += 1n;
+    // While the window's own bound limits it, heights begin in groups of `nodeBatchBlocks` (the module comment,
+    // **Batches**); a group no larger than the window, so the heights begun always reach past the cursor.
+    const group = BigInt(Math.min(this.#batchBlocks, this.#window));
+    if (end >= this.#cursor + BigInt(this.#window) && end - next + 1n < group) return;
+    for (let height = next; height <= end; height++) if (!this.#prefetch.has(height)) this.#begin(height);
   }
 
   /** Begins preparing the finalized height `height`, once a slot is free. */
@@ -773,38 +826,73 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     live();
     if (queued !== undefined) return queued;
     this.#fetchedFinalized.set(height, hash);
-    if (this.#rootsWanted && this.#rootPrefetched(height)) this.#prefetchRoot(height, hash);
     return this.#slot(async () => {
-      const node = await this.client.block(hash);
+      // The block, its events and its root are asked together (the module comment, **Batches**).
+      if (this.#rootsWanted && this.#rootPrefetched(height)) this.#prefetchRoot(height, hash, false);
+      const { node: fetching, events } = this.#fetchBlock(hash, false);
+      const node = await fetching;
       live();
       this.#checkHeight(node.header, height, "chain_getBlock");
-      return this.#prepare(runner, refOf(node.header, hash), node, false);
+      return this.#prepare(runner, refOf(node.header, hash), node, false, events);
     });
   }
 
-  /** Asks, in a slot, for the ledger root at the finalized `hash` of `height`, for `ledgerStateRoot` to take. */
-  #prefetchRoot(height: bigint, hash: Uint8Array): void {
+  /**
+   * `chain_getBlock` at `hash`, and with it the block's events once this run asked for a block's events (the module
+   * comment, **Batches**); a best block's without retries.
+   */
+  #fetchBlock(
+    hash: Uint8Array,
+    best: boolean,
+  ): { readonly node: Promise<NodeBlock>; readonly events: Promise<Uint8Array | null> | undefined } {
+    const options = best ? { retry: false } : undefined;
+    const node = this.client.block(hash, options);
+    if (!this.#eventsWanted) return { node, events: undefined };
+    const events = this.client.storage(systemEventsKey(), hash, options);
+    // `on-fetch` awaits them when it takes them; a block that fails before leaves them unawaited.
+    events.catch(() => undefined);
+    return { node, events };
+  }
+
+  /**
+   * Asks for the ledger root at the finalized `hash` of `height`, for `ledgerStateRoot` to take: in a slot of its own
+   * when `slotted` (the heights fetched before the run's first ask), else at once, in the slot of the block it is asked
+   * with.
+   */
+  #prefetchRoot(height: bigint, hash: Uint8Array, slotted = true): void {
     const key = hexOf(hash);
     if (this.#roots.has(key)) return;
     const signal = this.#rootsAbort.signal;
-    const root = this.#slot(async () => {
+    const ask = (): Promise<Uint8Array> => {
       // A root queued for a slot by a run that ended is never asked.
       signal.throwIfAborted();
       return this.client.ledgerStateRoot(hash, { signal });
-    });
+    };
+    const root = slotted ? this.#slot(async () => ask()) : ask();
     // `ledgerStateRoot` awaits it when it takes it; a root the loop passed, or a run that ended, leaves it unawaited.
     root.catch(() => undefined);
     this.#roots.set(key, { height, root });
   }
 
-  /** `on-fetch` and `on-parse` for `block`, fetched as `node`, through `runner`. */
-  async #prepare(runner: QueueRunner, block: BlockRef, node: NodeBlock, best: boolean): Promise<PreparedBlock> {
+  /**
+   * `on-fetch` and `on-parse` for `block`, fetched as `node` (with its `events` when they were asked with it), through
+   * `runner`. Events asked and not taken stop the asking with each block until `blockEvents` is asked again.
+   */
+  async #prepare(
+    runner: QueueRunner,
+    block: BlockRef,
+    node: NodeBlock,
+    best: boolean,
+    events?: Promise<Uint8Array | null>,
+  ): Promise<PreparedBlock> {
     const key = hexOf(block.hash);
-    this.#fetched.set(key, { node, best });
+    const fetched: Fetched = { node, best, events, taken: false };
+    this.#fetched.set(key, fetched);
     try {
       return Object.freeze({ block, items: await runner.prepare(block) });
     } finally {
       this.#fetched.delete(key);
+      if (events !== undefined && !fetched.taken) this.#eventsWanted = false;
     }
   }
 
@@ -885,10 +973,11 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     const block = refOf(header, hash);
     try {
       await runner.bestBlock(block);
-      const node = await this.client.block(hash, { retry: false });
+      const { node: fetching, events } = this.#fetchBlock(hash, true);
+      const node = await fetching;
       live();
       this.#checkHeight(node.header, height, "chain_getBlock");
-      const prepared = await this.#prepare(runner, block, node, true);
+      const prepared = await this.#prepare(runner, block, node, true, events);
       live();
       await this.#place(runner, { block, items: prepared.items }, live);
     } catch {
@@ -948,9 +1037,10 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     if (dropped.length > 0) await runner.rollback(dropped.map((queued) => queued.block));
     for (const { hash, header } of branch) {
       const ref = refOf(header, hash);
-      const node = await this.client.block(hash, { retry: false });
+      const { node: fetching, events } = this.#fetchBlock(hash, true);
+      const node = await fetching;
       live();
-      const { items } = await this.#prepare(runner, ref, node, true);
+      const { items } = await this.#prepare(runner, ref, node, true, events);
       live();
       this.#queue.push({ block: ref, items });
     }
@@ -976,8 +1066,8 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
 
 /**
  * The node source a process runs with: the runner's `source: (core) => …`, which `umbradb run` passes. It works over the
- * process's node client, with the `core` revision's `prefetchWindow` and `tipCap`. Throws when the process has no node
- * client (its `core` revision has no `node`).
+ * process's node client, with the `core` revision's `prefetchWindow`, `tipCap` and `nodeBatchBlocks`. Throws when the
+ * process has no node client (its `core` revision has no `node`).
  */
 export function nodeSourceOf(
   core: { readonly settings: unknown },
@@ -988,6 +1078,15 @@ export function nodeSourceOf(
       field: "node",
     });
   }
-  const settings = core.settings as { readonly prefetchWindow: number; readonly tipCap: number };
-  return new NodeBlockSource({ client: shared.nodeClient, prefetchWindow: settings.prefetchWindow, tipCap: settings.tipCap });
+  const settings = core.settings as {
+    readonly prefetchWindow: number;
+    readonly tipCap: number;
+    readonly nodeBatchBlocks?: number;
+  };
+  return new NodeBlockSource({
+    client: shared.nodeClient,
+    prefetchWindow: settings.prefetchWindow,
+    tipCap: settings.tipCap,
+    batchBlocks: settings.nodeBatchBlocks ?? 1,
+  });
 }

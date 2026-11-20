@@ -142,19 +142,26 @@ On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` w
   provider's daily quota). Each method the process used has `calls` (the calls made, each counted once however often it
   was tried; a subscription is a call, and so is each one made again after a reconnect; a notification is not),
   `attempts` (the tries sent, retries included; a try that found no connection sent nothing and is not one), `frames`
-  (the request frames those tries went in: one per try, since the process sends one call per frame) and `failures` (the
+  (the request frames that carried those tries: one per try sent alone; a JSON-RPC batch frame counts once under each
+  method it carries, so the frames of the methods add up to more than the frames sent) and `failures` (the
   calls that ended without an answer after any retries, by code: `node-unreachable`, `node-error`, `node-requirement`,
   `handle-closed`, `aborted` for a call the process itself ended, such as a prefetched root at a stop, and `other`). A
   method never used is absent, and so is a failure code with none. The counts start from 0 each time the process
   starts. Null only for the moment before the process makes its client. A provider that bills per request counts the
-  attempts; the requests per block are `attempts` over the heights committed.
+  attempts; the requests per block are `attempts` over the heights committed. A provider that bills a batch as one
+  request counts the frames (`batches.frames`).
+- `batches`: the node client's request frames and batches (`nodeBatchBlocks`, see [Batches](#batches)): `frames`, the
+  request frames sent since the process started, a batch frame once whatever it carried; and `refused`, whether the
+  node refused a batch on the current connection, so that its calls go one per frame until the next connection. Null
+  only for the moment before the process makes its client.
 
 What a finalized height asks of the node: `chain_getBlockHash` and `chain_getBlock`, and `state_getStorage` (its
 `System::Events`) with `core-chain-events`. While the process follows the head (the head within `prefetchWindow` of
 the cursor), the finalized hashes come from the finalized-heads notifications, each naming its block and its parent,
 and from the queued best blocks' parent links, so `chain_getBlockHash` is asked only for a height none of them names
 (after a jump in finality, or a reconnect); a best block that finalizes is not fetched again. Following the tip with
-`core-chain-events` thus costs about 2 calls per block (`chain_getBlock` and `state_getStorage`). Nothing is asked for
+`core-chain-events` thus costs about 2 calls per block (`chain_getBlock` and `state_getStorage`), sent in one request
+frame with `nodeBatchBlocks` above 1 ([Batches](#batches)). Nothing is asked for
 a height above the core's `stop` (or the height before an upgrade boundary) the process will not process. With `core-ledger-state`, `midnight_ledgerStateRoot` is asked only at the
 heights whose root it compares (see [The ledger root check](#the-ledger-root-check)): at the default interval, 17 of
 the 10,001 heights of a sync from genesis to 10,000. The runtime that built a block is named in its header (its `MNSV` digest),
@@ -166,6 +173,31 @@ its header names still halts with `metadata-mismatch`.
 
 A private process has no node: its `node` is null. The process publishes what `/status` shows at least once a second,
 and at once when the connection's state changes.
+
+### Batches
+
+The node client sends the calls the process makes at the same time (in one turn of its event loop) as one JSON-RPC
+batch frame: an array of requests, which the node answers with an array of answers. The `core` entry's
+`nodeBatchBlocks` (8 by default) sets how many prefetched blocks' calls share a frame. During a catch-up the prefetch
+begins heights in groups of `nodeBatchBlocks`, asks their hashes together, and then asks each block together with its
+`System::Events` (with `core-chain-events`) and, at a height whose root is compared, its ledger root; a batch holds at
+most 4 × `nodeBatchBlocks` calls. The prefetch prepares `nodeBatchBlocks` heights at a time, or 8 when that is more, so
+below 8 its eight heights still share frames. At the tip a block's block and events go in one frame. The calls are
+exactly those of single frames; only the frames change. Measured on the mainnet tape 1,780,001–1,790,000 (a catch-up,
+`core-chain-events` on): 30,007 calls in 30,007 frames with `nodeBatchBlocks: 1`, in about 3,300 frames (0.33 per
+block) at 8, and in about 1,700 (0.17 per block) at 16; following a simulated tip, 2,012 calls in 1,012 frames over
+1,001 blocks.
+
+Each call keeps its own id, timeout, retries and `retry: false`: one call's error, or its missing answer, fails only
+that call, which is retried alone as a single call would be. A node that does not take batches answers one with a
+JSON-RPC error whose id is null (`-32600 Invalid Request`, or another code, such as a response over the node's size
+limit), or not at all. The client takes either as a refusal (an error with a null id while a batch waits for its
+answers, or a call's timeout in a batch none of whose calls was answered), sends every call of that connection alone
+from then on, and sends the refused batch's calls again, each alone, after the retry's back-off. The first refusal is
+logged once (`node refused a JSON-RPC batch …`) and `/status` shows `node.batches.refused` while that connection lasts;
+the next connection tries batches again. `nodeBatchBlocks: 1` sends every call in a frame of its own, as before the
+setting existed. A process recorded through the tape tools' recorder (`npx tsx tools/tape/main.ts record`) needs
+`nodeBatchBlocks: 1`: the recorder takes single frames only.
 
 ## The ledger root check
 

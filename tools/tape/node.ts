@@ -25,18 +25,34 @@
  * answered. A session that starts with one is dropped as soon as it opens, so a run of them is an outage: each
  * connection fails, and the client backs off between them.
  *
+ * **Batches.** A JSON-RPC batch frame (a non-empty array of requests) is answered request by request from the same
+ * records, in order, as if each had come in a frame of its own, and the answers go out as one array frame once the
+ * slowest of them is due; a request a `fault: "timeout"` record matches has no answer in it, and a batch with no answer
+ * at all gets no frame. The records are marked answered when the array is sent, so the notifications they let through
+ * follow it. With `batches: false` a batch is refused as one invalid request (−32600, id null), as by a node that takes
+ * none.
+ *
  * **The call log** ({@link TapeNode.calls}) holds every request received, in order, with its session, occurrence, the
- * line of the record that answered it and what happened. Tests check a sync's methods against the allowed node calls by
- * it, and count calls in it. Frames that are not JSON-RPC 2.0 requests (a batch among them) are answered with
- * JSON-RPC's own errors (−32700, −32600) and logged too. Pings are answered by `ws`, so the node client's heartbeat
- * keeps the connection.
+ * line of the record that answered it and what happened, and for a request that came in a batch the batch frame's
+ * number (`frame`), so frames can be counted beside calls. Tests check a sync's methods against the allowed node calls
+ * by it, and count calls in it. Frames that are not JSON-RPC 2.0 requests are answered with JSON-RPC's own errors
+ * (−32700, −32600) and logged too. Pings are answered by `ws`, so the node client's heartbeat keeps the connection.
  */
 
 import { createServer, type Server } from "node:http";
 import { performance } from "node:perf_hooks";
 import { type WebSocket, WebSocketServer } from "ws";
 import { FAULT_RPC_CODE, NOT_ON_TAPE_RPC_CODE } from "./errors.js";
-import { errorFrame, notificationFrame, notificationMethod, readRequest, resultFrame } from "./frames.js";
+import {
+  batchFrame,
+  errorFrame,
+  notificationFrame,
+  notificationMethod,
+  type ReadRequest,
+  readBatch,
+  readRequest,
+  resultFrame,
+} from "./frames.js";
 import { type Json, jsonText, sortedJsonText } from "./json.js";
 import { listenOnRandomPort } from "./port.js";
 import {
@@ -96,12 +112,22 @@ export interface TapeCall {
   /** The tape line of the record that answered it, or null. */
   readonly line: number | null;
   readonly outcome: TapeOutcome;
+  /**
+   * The batch frame the request came in: the node's count of batch frames received, from 1 (`TapeNode.batches`);
+   * absent for a request sent in a frame of its own.
+   */
+  readonly frame?: number;
 }
 
 export interface TapeNodeOptions {
   readonly records: readonly TapeRecord[];
   /** The clock delays are timed on; {@link SYSTEM_CLOCK} by default. */
   readonly clock?: TapeClock;
+  /**
+   * Whether it answers JSON-RPC batch frames; true by default. False answers a batch with one `−32600 Invalid Request`
+   * (id null), as a node that does not take batches does, and logs it as one `invalid-request`.
+   */
+  readonly batches?: boolean;
 }
 
 interface Connection {
@@ -123,7 +149,9 @@ export class TapeNode {
   readonly #plans: readonly SessionPlan[];
   readonly #open = new Set<Connection>();
   readonly #calls: TapeCall[] = [];
+  readonly #batches: boolean;
   #connections = 0;
+  #batchFrames = 0;
   #closed: Promise<void> | undefined;
 
   private constructor(
@@ -132,7 +160,9 @@ export class TapeNode {
     port: number,
     clock: TapeClock,
     plans: readonly SessionPlan[],
+    batches: boolean,
   ) {
+    this.#batches = batches;
     this.#server = server;
     this.#wss = wss;
     this.#port = port;
@@ -149,7 +179,7 @@ export class TapeNode {
     const port = await listenOnRandomPort(server);
     // Frames are sent as they are (no compression, which `ws` would do on another thread and out of the send's turn).
     const wss = new WebSocketServer({ server, perMessageDeflate: false });
-    const node = new TapeNode(server, wss, port, options.clock ?? SYSTEM_CLOCK, plans);
+    const node = new TapeNode(server, wss, port, options.clock ?? SYSTEM_CLOCK, plans, options.batches ?? true);
     wss.on("connection", (socket) => node.#accept(socket));
     return node;
   }
@@ -166,6 +196,11 @@ export class TapeNode {
   /** Every request received, in order. */
   get calls(): readonly TapeCall[] {
     return Object.freeze([...this.#calls]);
+  }
+
+  /** The batch frames received so far: each batch's requests are logged with its number as `frame`. */
+  get batches(): number {
+    return this.#batchFrames;
   }
 
   /** The connections accepted so far: the sessions handed out. */
@@ -219,6 +254,11 @@ export class TapeNode {
   }
 
   #request(connection: Connection, text: string): void {
+    const batch = this.#batches ? readBatch(text) : null;
+    if (batch !== null) {
+      this.#batch(connection, batch);
+      return;
+    }
     const session = connection.session.plan.number;
     const request = readRequest(text);
     if (connection.dropping) {
@@ -227,44 +267,91 @@ export class TapeNode {
       this.#log({ session, method, params, occurrence: null, line: null, outcome: "dropped" });
       return;
     }
-    if (!request.valid) {
-      this.#log({ session, method: null, params: null, occurrence: null, line: null, outcome: "invalid-request" });
-      this.#send(connection, errorFrame(request.id, request.error));
+    const answer = this.#answer(connection, request, undefined);
+    if (answer.entry === undefined) {
+      if (answer.text !== null) this.#send(connection, answer.text);
       return;
+    }
+    const { entry, text: reply } = answer;
+    this.#later(connection, answer.delayMs, () => {
+      if (reply !== null) this.#send(connection, reply);
+      // A repeat's record was answered first (it came first, with the same delay): marking it again changes nothing.
+      this.#done(connection, [entry]);
+    });
+  }
+
+  /**
+   * A batch frame: each request answered from the records as a request in a frame of its own would be, in order, and
+   * logged with the frame's number. The answers go out as one array frame once the slowest is due (a request matched
+   * by a `fault: "timeout"` record has none in it; with no answer at all, nothing is sent), and the records are marked
+   * answered then, so the notifications they let through follow the array.
+   */
+  #batch(connection: Connection, requests: readonly ReadRequest[]): void {
+    this.#batchFrames += 1;
+    const frame = this.#batchFrames;
+    const session = connection.session.plan.number;
+    if (connection.dropping) {
+      for (const request of requests) {
+        const method = request.valid ? request.method : null;
+        const params = request.valid ? request.params : null;
+        this.#log({ session, method, params, occurrence: null, line: null, outcome: "dropped", frame });
+      }
+      return;
+    }
+    const replies: string[] = [];
+    const entries: Entry[] = [];
+    let delayMs = 0;
+    for (const request of requests) {
+      const answer = this.#answer(connection, request, frame);
+      if (answer.text !== null) replies.push(answer.text);
+      if (answer.entry !== undefined) entries.push(answer.entry);
+      delayMs = Math.max(delayMs, answer.delayMs);
+    }
+    this.#later(connection, delayMs, () => {
+      if (replies.length > 0) this.#send(connection, batchFrame(replies));
+      this.#done(connection, entries);
+    });
+  }
+
+  /**
+   * What answers `request` (logged here, with `frame` when it came in a batch): the answer's text (null for none), the
+   * record it marks answered once sent (none for a request no record answers), and the record's delay.
+   */
+  #answer(
+    connection: Connection,
+    request: ReadRequest,
+    frame: number | undefined,
+  ): { readonly text: string | null; readonly entry: Entry | undefined; readonly delayMs: number } {
+    const session = connection.session.plan.number;
+    const inBatch = frame === undefined ? {} : { frame };
+    if (!request.valid) {
+      this.#log({ session, method: null, params: null, occurrence: null, line: null, outcome: "invalid-request", ...inBatch });
+      return { text: errorFrame(request.id, request.error), entry: undefined, delayMs: 0 };
     }
     const { id, method, params } = request;
     const { occurrence, entry, repeat } = connection.session.take(method, params);
     if (entry === undefined) {
-      this.#log({ session, method, params, occurrence, line: null, outcome: "not-on-tape" });
+      this.#log({ session, method, params, occurrence, line: null, outcome: "not-on-tape", ...inBatch });
       const data = { method, params, session };
-      this.#send(connection, errorFrame(id, { code: NOT_ON_TAPE_RPC_CODE, message: `not-on-tape: ${method}`, data }));
-      return;
+      return { text: errorFrame(id, { code: NOT_ON_TAPE_RPC_CODE, message: `not-on-tape: ${method}`, data }), entry, delayMs: 0 };
     }
     const line = entry.line;
     if (entry.kind === "call") {
-      this.#log({ session, method, params, occurrence, line, outcome: repeat ? "repeated" : "answered" });
+      this.#log({ session, method, params, occurrence, line, outcome: repeat ? "repeated" : "answered", ...inBatch });
       const record = entry.record as CallRecord;
-      const answer = hasField(record, "result")
+      const text = hasField(record, "result")
         ? resultFrame(id, (record as { result: Json }).result)
         : errorFrame(id, (record as { error: Json }).error);
-      this.#later(connection, answerDelay(record), () => {
-        this.#send(connection, answer);
-        // A repeat's record was answered first (it came first, with the same delay): marking it again changes nothing.
-        this.#done(connection, entry);
-      });
-    } else if (entry.kind === "subscribe") {
-      this.#log({ session, method, params, occurrence, line, outcome: "subscribed" });
-      this.#send(connection, resultFrame(id, (entry.record as SubscribeRecord).subscribe));
-      this.#done(connection, entry);
-    } else {
-      const record = entry.record as FaultRecord;
-      this.#log({ session, method, params, occurrence, line, outcome: `fault-${record.fault}` });
-      if (record.fault === "error") {
-        const code = record.code ?? FAULT_RPC_CODE;
-        this.#send(connection, errorFrame(id, { code, message: `tape fault: ${method}` }));
-      }
-      this.#done(connection, entry);
+      return { text, entry, delayMs: answerDelay(record) };
     }
+    if (entry.kind === "subscribe") {
+      this.#log({ session, method, params, occurrence, line, outcome: "subscribed", ...inBatch });
+      return { text: resultFrame(id, (entry.record as SubscribeRecord).subscribe), entry, delayMs: 0 };
+    }
+    const record = entry.record as FaultRecord;
+    this.#log({ session, method, params, occurrence, line, outcome: `fault-${record.fault}`, ...inBatch });
+    const text = record.fault === "error" ? errorFrame(id, { code: record.code ?? FAULT_RPC_CODE, message: `tape fault: ${method}` }) : null;
+    return { text, entry, delayMs: 0 };
   }
 
   /** Runs `run` `delayMs` after now on the node's clock (at once for 0), setting the timer again if it fires early. */
@@ -286,8 +373,8 @@ export class TapeNode {
     arm(delayMs);
   }
 
-  #done(connection: Connection, entry: Entry): void {
-    connection.session.consume(entry);
+  #done(connection: Connection, entries: readonly Entry[]): void {
+    for (const entry of entries) connection.session.consume(entry);
     this.#walk(connection);
   }
 

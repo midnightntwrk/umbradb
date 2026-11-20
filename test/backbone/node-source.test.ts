@@ -1,5 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
+import { nodeBatchSizeOf } from "../../src/backbone/core-chain/core-chain.js";
+import { systemEventsKey } from "../../src/backbone/core-block-fetch/events.js";
 import { NodeBlockSource, nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { type Statement, statementText } from "../../src/db/repeated-statements.js";
@@ -110,16 +112,23 @@ afterEach(async () => {
 
 async function open(
   records: readonly TapeRecord[],
-  options: { readonly prefetchWindow?: number; readonly tipCap?: number; readonly concurrency?: number } = {},
+  options: {
+    readonly prefetchWindow?: number;
+    readonly tipCap?: number;
+    readonly concurrency?: number;
+    /** `nodeBatchBlocks`: the source's groups, and the client's batches of 4 calls a block (as `nodeOptionsOf` sets). */
+    readonly batchBlocks?: number;
+  } = {},
   Source: typeof NodeBlockSource = NodeBlockSource,
 ): Promise<Opened> {
   const node = await TapeNode.start({ records });
-  const client = new NodeClient({ url: node.url, connect: quiet });
+  const client = new NodeClient({ url: node.url, connect: quiet, batchSize: nodeBatchSizeOf(options.batchBlocks) });
   const source = new Source({
     client,
     prefetchWindow: options.prefetchWindow ?? 64,
     tipCap: options.tipCap ?? 600,
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+    ...(options.batchBlocks === undefined ? {} : { batchBlocks: options.batchBlocks }),
   });
   const result: Opened = { node, client, source, push: (c, s) => void extra.push({ client: c, source: s }) };
   opened.push(result);
@@ -1298,6 +1307,110 @@ describe("the finalized hashes at the tip (node call budget, FR-011–FR-014, ta
     });
     expect(above.map((call) => `${call.method} ${JSON.stringify(call.params)}`)).toEqual([]);
     expect(runner.calls.filter((call) => call.startsWith("best"))).toEqual([]);
+  }, PATIENCE_MS);
+});
+
+describe("batches: the calls of several heights made together (node call budget, FR-016–FR-017)", () => {
+  const EVENTS = hex(systemEventsKey());
+  const eventsOf = (block: ChainBlock): string => hex(new Uint8Array([Number(block.height % 250n)]));
+  /** A catch-up from S = 1 to `head`: per height its hash, block and events. */
+  const catchUp = (head: number): TapeRecord[] => [
+    ...subscriptions(),
+    ...headRead(at(head)),
+    ...chain.slice(1, head + 1).flatMap((block) => [
+      ...hashAndBlock(block),
+      { method: "state_getStorage", params: [EVENTS, block.hex], result: eventsOf(block) } as TapeRecord,
+    ]),
+  ];
+  /** A runner whose `on-fetch` reads each block's events, as `core-chain-events` does, up to `upTo`. */
+  class EventsRunner extends Recorder {
+    readonly events = new Map<bigint, string | null>();
+    constructor(
+      readonly source: NodeBlockSource,
+      readonly upTo = Number.POSITIVE_INFINITY,
+    ) {
+      super();
+    }
+    override async prepare(block: BlockRef): Promise<BlockItems> {
+      if (Number(block.height) <= this.upTo) {
+        const bytes = await this.source.blockEvents(block);
+        this.events.set(block.height, bytes === null ? null : hex(bytes));
+      }
+      return super.prepare(block);
+    }
+  }
+  /** The frames that carried `method`'s requests in the tape node's log (a batch once, a request alone once). */
+  const framesOf = (node: TapeNode, method: string): number =>
+    new Set(node.calls.flatMap((call, index) => (call.method === method ? [call.frame === undefined ? `s${index}` : `b${call.frame}`] : []))).size;
+
+  it("begins heights in groups of nodeBatchBlocks while catching up: their hashes, then their blocks and events, go in few frames", async () => {
+    const { source, node } = await open(catchUp(100), { prefetchWindow: 16, batchBlocks: 8 });
+    const runner = new EventsRunner(source);
+    source.attach(runner);
+    await source.finalizedHead();
+    for (let height = 1n; height <= 100n; height++) await source.prepared(height);
+    // Every height's block and events once, the events as the node answered them.
+    expect(node.count("chain_getBlock")).toBe(100);
+    expect(node.count("state_getStorage")).toBe(100);
+    expect([...runner.events.values()]).toEqual(chain.slice(1, 101).map(eventsOf));
+    // About one frame per eight heights for each kind of call (the window's first fill and its tail aside), where each
+    // call went alone before; the events from the second height on in the frames of the blocks.
+    expect(framesOf(node, "chain_getBlockHash")).toBeLessThanOrEqual(100 / 8 + 4);
+    expect(framesOf(node, "chain_getBlock")).toBeLessThanOrEqual(100 / 8 + 4);
+    expect(framesOf(node, "state_getStorage")).toBeLessThanOrEqual(100 / 8 + 4);
+    const blockFrame = new Map(node.calls.filter((call) => call.method === "chain_getBlock").map((call) => [(call.params as string[])[0], call.frame]));
+    const together = node.calls.filter((call) => call.method === "state_getStorage" && call.frame !== undefined && call.frame === blockFrame.get((call.params as string[])[1]));
+    expect(together.length).toBeGreaterThanOrEqual(90);
+  }, PATIENCE_MS);
+
+  it("with nodeBatchBlocks 1 begins each height as the window has room and sends every call alone, as before", async () => {
+    const { source, node } = await open(catchUp(40), { prefetchWindow: 8 });
+    const runner = new EventsRunner(source);
+    source.attach(runner);
+    await source.finalizedHead();
+    const highest = () => Math.max(0, ...node.calls.filter((c) => c.method === "chain_getBlockHash").map((c) => (c.params as number[])[0] as number));
+    for (let height = 1n; height <= 32n; height++) {
+      await source.prepared(height);
+      // The window refills one height at a time: the next height above the window's is asked as the loop takes one.
+      await until(() => highest() >= Math.min(Number(height) - 1 + 8, 39), `height ${Number(height) - 1 + 8} begun`);
+    }
+    expect(node.batches).toBe(0);
+    // One events read per height prepared (the prefetch prepares up to 39), each the one on-fetch took.
+    await sleep(50);
+    expect(node.count("state_getStorage")).toBe(runner.events.size);
+    expect([...runner.events.entries()].sort(([x], [y]) => Number(x - y)).map(([, events]) => events)).toEqual(
+      chain.slice(1, runner.events.size + 1).map(eventsOf),
+    );
+  }, PATIENCE_MS);
+
+  it("holds back a group until it fits the window: no height begun alone while catching up", async () => {
+    const { source, node } = await open(catchUp(100), { prefetchWindow: 16, batchBlocks: 8 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    const asked = () => node.calls.filter((c) => c.method === "chain_getBlockHash").map((c) => (c.params as number[])[0] as number);
+    for (let height = 1n; height <= 40n; height++) {
+      await source.prepared(height);
+      await sleep(5);
+      // The heights asked always end at the cursor + 16 rounded down to a group: 16, 24, 32, … — never in between.
+      const top = Math.max(...asked());
+      expect(top % 8, `after ${height}: ${top}`).toBe(0);
+      expect(top).toBeLessThanOrEqual(Number(height) - 1 + 16);
+      expect(top).toBeGreaterThanOrEqual(Number(height) - 1 + 16 - 7);
+    }
+  }, PATIENCE_MS);
+
+  it("stops asking events with the blocks once a block's preparation takes none, until they are asked again", async () => {
+    const { source, node } = await open(catchUp(60), { prefetchWindow: 8, batchBlocks: 4 });
+    const runner = new EventsRunner(source, 20);
+    source.attach(runner);
+    await source.finalizedHead();
+    for (let height = 1n; height <= 60n; height++) await source.prepared(height);
+    // 1–20 read by on-fetch; asked with the blocks fetched after: at most a window's worth more, then none.
+    expect(runner.events.size).toBe(20);
+    expect(node.count("state_getStorage")).toBeGreaterThanOrEqual(20);
+    expect(node.count("state_getStorage")).toBeLessThanOrEqual(20 + 8 + 4);
+    const asked = node.calls.filter((c) => c.method === "state_getStorage").map((c) => (c.params as string[])[1]);
+    expect(asked).not.toContain(at(40).hex);
   }, PATIENCE_MS);
 });
 

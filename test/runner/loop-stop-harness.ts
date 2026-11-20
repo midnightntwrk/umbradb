@@ -158,9 +158,11 @@ class Outage {
     };
   };
 
+  /** Whether the frame `text` holds the cut request: alone, or in a JSON-RPC batch (`nodeBatchBlocks`). */
   #isCut(text: string): boolean {
-    const request = JSON.parse(text) as { readonly method?: unknown; readonly params?: unknown };
-    return request.method === this.#cut.method && JSON.stringify(request.params) === this.#cut.params;
+    const frame = JSON.parse(text) as unknown;
+    const requests = (Array.isArray(frame) ? frame : [frame]) as { readonly method?: unknown; readonly params?: unknown }[];
+    return requests.some((request) => request.method === this.#cut.method && JSON.stringify(request.params) === this.#cut.params);
   }
 }
 

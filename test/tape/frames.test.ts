@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  batchFrame,
   errorFrame,
   isSubscribeMethod,
   notificationFrame,
   notificationMethod,
+  readBatch,
   readRequest,
   resultFrame,
 } from "../../tools/tape/index.js";
@@ -61,5 +63,18 @@ describe("the tape's JSON-RPC frames", () => {
       id: 2,
       error: { code: -32600 },
     });
+  });
+
+  it("reads a batch as its requests, each read as a frame of its own, and writes a batch's answers as one array", () => {
+    expect(readBatch('[{"jsonrpc":"2.0","id":1,"method":"m"},{"jsonrpc":"2.0","id":2,"method":"m","params":1},3]')).toEqual([
+      { valid: true, id: 1, method: "m", params: [] },
+      { valid: false, id: 2, error: { code: -32600, message: "Invalid Request" } },
+      { valid: false, id: null, error: { code: -32600, message: "Invalid Request" } },
+    ]);
+    // Not a batch: not JSON, not an array, or an empty array (one invalid request in JSON-RPC 2.0).
+    for (const text of ["{oops", '{"jsonrpc":"2.0","id":1,"method":"m"}', "[]"]) expect(readBatch(text)).toBeNull();
+    expect(batchFrame([resultFrame(1, 1), errorFrame(2, { code: 1, message: "e" })])).toBe(
+      '[{"jsonrpc":"2.0","id":1,"result":1},{"jsonrpc":"2.0","id":2,"error":{"code":1,"message":"e"}}]',
+    );
   });
 });

@@ -82,6 +82,12 @@ export type CoreSettingsBase = {
    * height).
    */
   readonly ledgerRootInterval?: number;
+  /**
+   * How many prefetched blocks' node calls go to the node in one JSON-RPC batch frame: the prefetch begins blocks in
+   * groups of this many and the node client sends the calls made together as one batch; a whole number of at least 1
+   * (8; 1 sends every call in a frame of its own).
+   */
+  readonly nodeBatchBlocks?: number;
   readonly backoffCeilingMs?: number;
   /** A file path. */
   readonly backupAtStop?: string;

@@ -71,6 +71,18 @@ export interface NodeStatus {
    * code (`src/node/counts.ts`); null before the process made its client.
    */
   readonly calls: NodeCallCounts | null;
+  /**
+   * The node client's request frames and batches (FR-019 of the node call budget): the frames sent since the process
+   * made it, a batch frame once whatever it carried, and whether the node refused a batch on the current connection, so
+   * that its calls go one per frame until the next; null before the process made its client.
+   */
+  readonly batches: NodeBatches | null;
+}
+
+/** {@link NodeStatus.batches}. */
+export interface NodeBatches {
+  readonly frames: number;
+  readonly refused: boolean;
 }
 
 /** One table of a module, with its row of `core_digest.tables`: its last-changed height and digest. */

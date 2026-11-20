@@ -149,7 +149,11 @@ describe("what /status shows besides status()", () => {
       tipCap: 600,
       finalityStall: false,
       calls,
+      batches: null,
     });
+    // The frames and the batch refusal (FR-019 of the node call budget), as the process reports them.
+    const batches = { frames: 2, refused: true };
+    expect(snapshotOf(status(), { ...FACTS, node: { ...node, batches } }).status.node?.batches).toEqual(batches);
     for (const connection of ["connecting", "connected", "retrying", "closed"] as const) {
       expect(snapshotOf(status(), { ...FACTS, node: { ...node, connection } }).status.node?.connection).toBe(connection);
     }

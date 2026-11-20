@@ -92,7 +92,7 @@ describe("the snapshot of status()", () => {
         reason: null,
         instance: { role: "core", id: null },
         lastCommitAt: null,
-        node: { finalizedHead: "9", bestHead: null, connection: null, retries: 2, queueDepth: null, tipCap: 600, finalityStall: false, calls: null },
+        node: { finalizedHead: "9", bestHead: null, connection: null, retries: 2, queueDepth: null, tipCap: 600, finalityStall: false, calls: null, batches: null },
         modules: null,
         ledger: null,
         privateInstances: null,

@@ -27,7 +27,16 @@ import type { NodeConnection } from "../node/client.js";
 import type { NodeCallCounts } from "../node/counts.js";
 import type { ProcessStatus } from "../runner/process.js";
 import { sanitizedError } from "./errors.js";
-import type { AdminSnapshot, ConfigSnapshot, LedgerStatus, ModuleStatus, NodeStatus, PrivateInstanceStatus, StatusSnapshot } from "./types.js";
+import type {
+  AdminSnapshot,
+  ConfigSnapshot,
+  LedgerStatus,
+  ModuleStatus,
+  NodeBatches,
+  NodeStatus,
+  PrivateInstanceStatus,
+  StatusSnapshot,
+} from "./types.js";
 
 /**
  * The default liveness timeout (30 s), read from the `core` schema: the snapshot's before the configuration's.
@@ -113,6 +122,8 @@ export interface NodeFacts {
   readonly calls: NodeCallCounts | null;
   /** The last height whose ledger root matched the node's (`SourceNodeView.lastRootMatch`); null before any. */
   readonly lastRootMatch?: bigint | null;
+  /** The node client's frames sent and whether the current connection refused batches; null (or absent) before it. */
+  readonly batches?: NodeBatches | null;
 }
 
 /** What a snapshot holds besides `status()`. */
@@ -181,6 +192,7 @@ function nodeOf(status: ProcessStatus, tipCap: number, node: NodeFacts | undefin
     tipCap,
     finalityStall: status.conditions.some((condition) => (condition.code as string) === "finality-stall"),
     calls: node?.calls ?? null,
+    batches: node?.batches ?? null,
   });
 }
 

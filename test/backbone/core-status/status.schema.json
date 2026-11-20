@@ -590,7 +590,8 @@
         "queueDepth",
         "tipCap",
         "finalityStall",
-        "calls"
+        "calls",
+        "batches"
       ],
       "properties": {
         "finalizedHead": {
@@ -661,6 +662,31 @@
               },
               "additionalProperties": {
                 "$ref": "#/$defs/nodeMethodCounts"
+              }
+            }
+          ]
+        },
+        "batches": {
+          "description": "The node client's request frames and batches (FR-019 of the node call budget): frames sent since the process made it, a JSON-RPC batch frame once whatever it carried; and whether the node refused a batch on the current connection, whose calls then go one per frame until the next; null only before the process made its node client.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "frames",
+                "refused"
+              ],
+              "properties": {
+                "frames": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "refused": {
+                  "type": "boolean"
+                }
               }
             }
           ]

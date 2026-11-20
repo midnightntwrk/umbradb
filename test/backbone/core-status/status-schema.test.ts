@@ -130,6 +130,19 @@ describe("/status's JSON schema", () => {
     expect(STATUS_SCHEMA.problems({ ...body(), node: without })).not.toEqual([]);
   });
 
+  it("holds the node client's frames and batch refusal, or null; and refuses another form", () => {
+    const node = (body() as { node: Record<string, unknown> }).node;
+    expect(node.batches).toBeNull();
+    for (const batches of [{ frames: 0, refused: false }, { frames: 12, refused: true }]) {
+      expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, batches } })).toEqual([]);
+    }
+    for (const wrong of [{ frames: -1, refused: false }, { frames: 1 }, { refused: true }, { frames: 1, refused: "no" }, { frames: 1, refused: false, size: 8 }, 3]) {
+      expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, batches: wrong } }), JSON.stringify(wrong)).not.toEqual([]);
+    }
+    const { batches: _batches, ...without } = node;
+    expect(STATUS_SCHEMA.problems({ ...body(), node: without })).not.toEqual([]);
+  });
+
   it("holds the ledger's last matched root check, or null; and refuses another form", () => {
     expect((body() as { ledger: unknown }).ledger).toBeNull();
     expect(STATUS_SCHEMA.problems({ ...body(), ledger: { lastRootMatch: "600" } })).toEqual([]);
@@ -345,7 +358,7 @@ describe.each(PROCESS_BACKENDS)("/status through the process validates in every 
     expect(shown).toMatchObject({ state: "following", instance: { role: "core", id: null }, public: null, ledger: null, privateInstances: [] });
     // The in-memory source keeps no best-block queue and hears no best head. The process's node client, which it never
     // uses, has not connected: it shows `connecting`, as before the first connection, and has counted no call.
-    expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false, calls: {} });
+    expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false, calls: {}, batches: { frames: 0, refused: false } });
     const committed = Date.parse(shown.lastCommitAt);
     expect(committed).toBeGreaterThanOrEqual(before);
     expect(committed).toBeLessThanOrEqual(after);
