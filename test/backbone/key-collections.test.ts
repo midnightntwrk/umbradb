@@ -52,6 +52,18 @@ describe("KeySet", () => {
     expect(set.has(keyOf("8001"))).toBe(false);
   });
 
+  it("holds the empty key in the first shard, before every other key", () => {
+    const set = new KeySet();
+    for (const hex of ["01", "", "00", ""]) set.add(keyOf(hex));
+    expect(set.size).toBe(3);
+    expect(set.has(keyOf(""))).toBe(true);
+    expect([...set.sorted()].map(hexOfKey)).toEqual(["", "00", "01"]);
+    const map = new KeyMap<number>();
+    map.set(keyOf(""), 7);
+    expect(map.get(keyOf(""))).toBe(7);
+    expect(map.has(keyOf("00"))).toBe(false);
+  });
+
   it("holds more keys than one Set can (2^24), which a Set refuses", () => {
     const limit = 2 ** 24;
     // Not vacuous: one Set refuses the key after the limit.
