@@ -24,6 +24,7 @@ import type { PlainData, PlainObject } from "../config/plain-data.js";
 import { type ProcessSide, PUBLIC_CORE_SCHEMA } from "../config/core-settings.js";
 import type { Redactor } from "../config/redact.js";
 import type { NodeConnection } from "../node/client.js";
+import type { NodeCallCounts } from "../node/counts.js";
 import type { ProcessStatus } from "../runner/process.js";
 import { sanitizedError } from "./errors.js";
 import type { AdminSnapshot, ConfigSnapshot, ModuleStatus, NodeStatus, PrivateInstanceStatus, StatusSnapshot } from "./types.js";
@@ -108,6 +109,8 @@ export interface NodeFacts {
   readonly bestHead: bigint | null;
   readonly connection: NodeConnection | null;
   readonly queueDepth: number | null;
+  /** The node client's counts per method (`src/node/counts.ts`). */
+  readonly calls: NodeCallCounts | null;
 }
 
 /** What a snapshot holds besides `status()`. */
@@ -138,7 +141,7 @@ export interface SnapshotFacts {
   readonly privateInstances?: readonly PrivateInstanceFacts[];
   /** On a private process, whether it runs in lockstep, null while unknown; null unless given. */
   readonly publicLockstep?: boolean | null;
-  /** On the core, its node besides `status()`; the three null unless given. A private process has none. */
+  /** On the core, its node besides `status()`; the four null unless given. A private process has none. */
   readonly node?: NodeFacts;
 }
 
@@ -156,7 +159,7 @@ function instancesOf(instances: readonly PrivateInstanceFacts[]): readonly Priva
   );
 }
 
-/** The node as the core sees it (see {@link NodeStatus}): `status()`'s, and `node`'s three facts. */
+/** The node as the core sees it (see {@link NodeStatus}): `status()`'s, and `node`'s four facts. */
 function nodeOf(status: ProcessStatus, tipCap: number, node: NodeFacts | undefined): NodeStatus {
   const retrying = status.conditions.find((condition) => condition.code === "node-retrying") as
     | { readonly attempts: number }
@@ -169,6 +172,7 @@ function nodeOf(status: ProcessStatus, tipCap: number, node: NodeFacts | undefin
     queueDepth: node?.queueDepth ?? null,
     tipCap,
     finalityStall: status.conditions.some((condition) => (condition.code as string) === "finality-stall"),
+    calls: node?.calls ?? null,
   });
 }
 

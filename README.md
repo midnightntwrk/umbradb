@@ -224,7 +224,8 @@ No command or an unknown one prints the usage and exits 2; 3 is kept for a comma
 `umbradb run` reads two variables of its environment, for measuring a sync. `UMBRADB_TRACE=<file>` writes the block
 trace: one JSON line per committed height in `<file>` saying where its time went, the statements' totals in
 `<file>.stmts.json`, and one line per block the ledger worker applied in `<file>.worker.jsonl`.
-`UMBRADB_TRACE_STEPS=1` beside it adds each reclamation step's detail to a height's line. Without `UMBRADB_TRACE`
+`UMBRADB_TRACE_STEPS=1` beside it adds each reclamation step's detail to a height's line. A height's line also holds
+the node requests sent since the line before, per method (`node`). Without `UMBRADB_TRACE`
 nothing is traced, and a traced process stores what an untraced one stores. A write of the trace that fails once the
 process is started (a full disk) halts processing. The keys are in the
 [operator guide](docs/operator-guide.md#measuring-a-sync-the-block-trace).
@@ -329,7 +330,9 @@ run in a worker thread of their own, so they answer while a block holds the data
 - `GET /health/ready`: 200 when the process should get traffic: `syncing` or `following` within `readinessLag` (if
   set), or `stopped`; 503 otherwise.
 - `GET /status`: the state, conditions, cursor, node head and lag; the `reason` of a refusal or halt (its code,
-  height, module and point); the node; every module with its tables' digests; the ledger; the private instances.
+  height, module and point); the node, with the calls the process sent it per method since it started
+  (`node.calls`: calls, tries, frames and failed calls by code, for measuring a provider's request quota); every module
+  with its tables' digests; the ledger; the private instances.
 - `GET /config`: the configuration as validated (secrets `[redacted]`), its history, every module's declaration
   without its callbacks, the chain, the ledger table, the database, and how each surface is served (`network`:
   `listening`, `connecting`, `mounted`, `channels`, `connect` or `none`).

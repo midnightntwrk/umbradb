@@ -14,6 +14,7 @@
 
 import type { PlainData, PlainObject } from "../config/plain-data.js";
 import type { NodeConnection } from "../node/client.js";
+import type { NodeCallCounts } from "../node/counts.js";
 import type { ProcessState } from "../runner/process.js";
 
 /**
@@ -65,6 +66,11 @@ export interface NodeStatus {
   readonly tipCap: number;
   /** Whether the condition `finality-stall` is raised. */
   readonly finalityStall: boolean;
+  /**
+   * The node client's counts since the process made it, per method used: calls, tries sent, frames and failed calls by
+   * code (`src/node/counts.ts`); null before the process made its client.
+   */
+  readonly calls: NodeCallCounts | null;
 }
 
 /** One table of a module, with its row of `core_digest.tables`: its last-changed height and digest. */

@@ -48,10 +48,15 @@
  *
  * **Errors** are `UmbraError`s (`./errors.ts`) whose codes say whether the failure is retried or halts the process.
  * None names the node's URL, which is a `secret` field.
+ *
+ * **Counts.** {@link NodeClient.calls} holds, per method, the calls made, the tries sent, the frames they went in and
+ * the calls that failed, by code, since the client was made (`./counts.ts`); `/status` shows them, and the block trace
+ * adds them to its lines.
  */
 
 import { UmbraError } from "../db/errors.js";
 import { backoffDelay } from "./backoff.js";
+import { failureCode, type NodeCallCounts, NodeCallCounter } from "./counts.js";
 import {
   blockAnswer,
   byteArrayAnswer,
@@ -218,6 +223,7 @@ export class NodeClient {
   readonly #sleeps = new Set<(error: unknown) => void>();
   readonly #subscriptions = new Set<Subscription>();
   readonly #byNodeId = new Map<string, Subscription>();
+  readonly #counts = new NodeCallCounter();
 
   constructor(options: NodeClientOptions) {
     let url: URL;
@@ -252,6 +258,14 @@ export class NodeClient {
     if (this.#state === "closed") return "closed";
     if (this.#state === "open") return "connected";
     return this.#reconnecting ? "retrying" : "connecting";
+  }
+
+  /**
+   * The calls, tries sent, frames and failed calls of each method used since the client was made (`./counts.ts`), as
+   * plain frozen data.
+   */
+  get calls(): NodeCallCounts {
+    return this.#counts.snapshot();
   }
 
   /** `chain_getFinalizedHead`: the hash of the node's finalized head. */
@@ -456,6 +470,7 @@ export class NodeClient {
     }
     const signal = options.signal;
     if (this.#state === "closed") throw clientClosed();
+    this.#counts.call(method);
     let attempt = 0;
     try {
       for (;;) {
@@ -474,6 +489,9 @@ export class NodeClient {
           await this.#sleep(delayMs, signal);
         }
       }
+    } catch (error) {
+      this.#counts.failed(method, failureCode(error, signal?.aborted === true));
+      throw error;
     } finally {
       if (attempt > 0) {
         this.#retryingCalls -= 1;
@@ -528,6 +546,7 @@ export class NodeClient {
         },
       });
       signal?.addEventListener("abort", onAbort, { once: true });
+      this.#counts.sent(method);
       socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
     });
   }

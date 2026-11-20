@@ -1473,6 +1473,135 @@ describe("races and the default clock", () => {
   });
 });
 
+describe("call counts per method (FR-015 of the node call budget)", () => {
+  it("counts N calls as N calls, N attempts and N frames, with no failure", async () => {
+    const node = await startNode();
+    node.on("chain_getBlockHash", (params) => ({ result: hash(Number(params[0])) }));
+    const c = client(node.url());
+    expect(c.calls).toEqual({});
+    for (let n = 1; n <= 5; n++) await c.blockHash(BigInt(n));
+    expect(c.calls).toEqual({ chain_getBlockHash: { calls: 5, attempts: 5, frames: 5, failures: {} } });
+    expect(node.count("chain_getBlockHash")).toBe(5);
+  });
+
+  it("counts a call tried three times (two timeouts, then an answer) as 1 call and 3 attempts", async () => {
+    const node = await startNode();
+    let tries = 0;
+    node.on("chain_getFinalizedHead", () => (++tries <= 2 ? { silent: true } : { result: MAINNET_BLOCK }));
+    const timers = new ManualTimers();
+    const c = client(node.url(), { timers, callTimeoutMs: 5_000 });
+    const head = c.finalizedHead();
+    await until(() => tries === 1, "the first try");
+    await timers.advance(5_000 + 1_000);
+    await until(() => tries === 2, "the second try");
+    await timers.advance(5_000 + 2_000);
+    expect(hex(await head)).toBe(MAINNET_BLOCK);
+    expect(tries).toBe(3);
+    expect(c.calls).toEqual({ chain_getFinalizedHead: { calls: 1, attempts: 3, frames: 3, failures: {} } });
+  });
+
+  it("counts a retry: false failure as 1 attempt and 1 failure under its code, and a halting error the same", async () => {
+    const node = await startNode();
+    node.on("chain_getBlockHash", () => ({ error: { code: -32999, message: "RPC rate limit exceeded" } }));
+    node.on("midnight_ledgerStateRoot", () => ({ error: { code: -32000, message: "anything else" } }));
+    const timers = new ManualTimers();
+    const c = client(node.url(), { timers });
+    expect((await umbra(c.blockHash(3n, { retry: false }))).code).toBe("node-unreachable");
+    expect((await umbra(c.ledgerStateRoot(AT))).code).toBe("node-error");
+    await timers.advance(HOUR);
+    expect(c.calls).toEqual({
+      chain_getBlockHash: { calls: 1, attempts: 1, frames: 1, failures: { "node-unreachable": 1 } },
+      midnight_ledgerStateRoot: { calls: 1, attempts: 1, frames: 1, failures: { "node-error": 1 } },
+    });
+  });
+
+  it("counts a call its signal ends as aborted, and a call ended by close() as handle-closed", async () => {
+    const node = await startNode();
+    node.on("chain_getBlock", () => ({ silent: true }));
+    node.on("state_getMetadata", () => ({ silent: true }));
+    const timers = new ManualTimers();
+    const c = client(node.url(), { timers });
+    const controller = new AbortController();
+    const aborted = caught(c.block(AT, { signal: controller.signal }));
+    const closed = caught(c.metadata(AT));
+    await until(() => node.count("chain_getBlock") === 1 && node.count("state_getMetadata") === 1, "both calls sent");
+    controller.abort(new Error("the run ended"));
+    await aborted;
+    await c.close();
+    await closed;
+    expect(c.calls).toEqual({
+      chain_getBlock: { calls: 1, attempts: 1, frames: 1, failures: { aborted: 1 } },
+      state_getMetadata: { calls: 1, attempts: 1, frames: 1, failures: { "handle-closed": 1 } },
+    });
+  });
+
+  it("counts subscriptions as calls, each one made again after a reconnect too, and no notification", async () => {
+    const node = await startNode();
+    const timers = new ManualTimers();
+    const retries: NodeRetry[] = [];
+    const c = client(node.url(), { timers, onRetry: (retry) => retries.push(retry) });
+    const heads: string[] = [];
+    let restarted = 0;
+    await c.subscribeNewHeads({ header: (h) => heads.push(`new ${h.number}`), restarted: () => restarted++ });
+    await c.subscribeFinalizedHeads({ header: (h) => heads.push(`fin ${h.number}`) });
+    expect(node.notify("chain_newHead", headerJson(11))).toBe(1);
+    expect(node.notify("chain_finalizedHead", headerJson(10))).toBe(1);
+    await until(() => heads.length === 2, "the two heads");
+    const once = { calls: 1, attempts: 1, frames: 1, failures: {} };
+    expect(c.calls).toEqual({ chain_subscribeFinalizedHeads: once, chain_subscribeNewHeads: once });
+    node.drop();
+    await until(() => retries.length === 1, "the reconnect to be scheduled");
+    await timers.advance(1_000);
+    await until(() => restarted === 1 && node.received.length === 4, "both subscriptions made again");
+    const twice = { calls: 2, attempts: 2, frames: 2, failures: {} };
+    expect(c.calls).toEqual({ chain_subscribeFinalizedHeads: twice, chain_subscribeNewHeads: twice });
+  });
+
+  it("counts no call for a request refused before it is sent: a method outside the allowed calls, a bad parameter", async () => {
+    const node = await startNode();
+    const c = client(node.url());
+    await expect(c.call("rpc_methods" as never, [])).rejects.toMatchObject({ code: "node-error", details: { reason: "method-not-allowed" } });
+    await expect(c.blockHash(-1n)).rejects.toBeInstanceOf(UmbraError);
+    expect(c.calls).toEqual({});
+    expect(node.received).toEqual([]);
+  });
+
+  it("counts an attempt only for a try sent: nothing is sent on a connection that ends as it opens", async () => {
+    const scripted = scriptedSockets();
+    const c = client("ws://node.invalid", { connect: scripted.connect, timers: scripted.timers });
+    const retried = c.finalizedHead();
+    const once = umbra(c.finalizedHead({ retry: false }));
+    const first = await scripted.next();
+    first.events.open();
+    first.events.closed({ kind: "closed", code: 1006 });
+    expect((await once).code).toBe("node-unreachable");
+    expect(first.sent).toEqual([]);
+    expect(c.calls).toEqual({ chain_getFinalizedHead: { calls: 2, attempts: 0, frames: 0, failures: { "node-unreachable": 1 } } });
+    await scripted.timers.advance(1_000);
+    const second = await scripted.next();
+    second.events.open();
+    await turns();
+    const request = JSON.parse(second.sent[0] as string) as { id: number };
+    second.events.message(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: MAINNET_BLOCK }));
+    expect(hex(await retried)).toBe(MAINNET_BLOCK);
+    expect(c.calls).toEqual({ chain_getFinalizedHead: { calls: 2, attempts: 1, frames: 1, failures: { "node-unreachable": 1 } } });
+  });
+
+  it("gives plain frozen data, each read a copy that later calls do not change", async () => {
+    const node = await startNode();
+    node.on("chain_getBlockHash", () => ({ result: hash(1) }));
+    const c = client(node.url());
+    await c.blockHash(1n);
+    const before = c.calls;
+    expect(Object.isFrozen(before)).toBe(true);
+    expect(Object.isFrozen(before.chain_getBlockHash)).toBe(true);
+    await c.blockHash(1n);
+    expect(before.chain_getBlockHash?.calls).toBe(1);
+    expect(c.calls.chain_getBlockHash?.calls).toBe(2);
+    expect(structuredClone(c.calls)).toEqual(c.calls);
+  });
+});
+
 describe("the allowed node methods over the suite", () => {
   it("sent the fake nodes nothing but the allowed node methods, in every test above (run last)", () => {
     expect(outsideNodeMethods(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);

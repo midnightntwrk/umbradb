@@ -106,6 +106,30 @@ describe("/status's JSON schema", () => {
     expect(STATUS_SCHEMA.problems({ ...body(), node: null })).toEqual([]);
   });
 
+  it("holds the node client's call counts per method, or null; and refuses an unknown method, code or field", () => {
+    const node = (body() as { node: Record<string, unknown> }).node;
+    expect(node.calls).toBeNull();
+    const calls = {
+      chain_getBlock: { calls: 3, attempts: 5, frames: 5, failures: { "node-unreachable": 1, aborted: 1 } },
+      chain_subscribeNewHeads: { calls: 1, attempts: 1, frames: 1, failures: {} },
+    };
+    expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, calls } })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, calls: {} } })).toEqual([]);
+    const wrong = [
+      { rpc_methods: { calls: 1, attempts: 1, frames: 1, failures: {} } },
+      { chain_getBlock: { calls: 1, attempts: 1, frames: 1, failures: { teapot: 1 } } },
+      { chain_getBlock: { calls: 1, attempts: 1, frames: 1, failures: { "node-error": 0 } } },
+      { chain_getBlock: { calls: -1, attempts: 1, frames: 1, failures: {} } },
+      { chain_getBlock: { calls: 1, attempts: 1, failures: {} } },
+      { chain_getBlock: { calls: 1, attempts: 1, frames: 1, failures: {}, retries: 0 } },
+    ];
+    for (const shown of wrong) {
+      expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, calls: shown } }), JSON.stringify(shown)).not.toEqual([]);
+    }
+    const { calls: _calls, ...without } = node;
+    expect(STATUS_SCHEMA.problems({ ...body(), node: without })).not.toEqual([]);
+  });
+
   it("holds slow-block: the height, the point, the module or null while none runs", () => {
     const slow = { code: "slow-block", height: "4", point: "on-compute", module: "m" };
     expect(STATUS_SCHEMA.problems({ ...body(), conditions: [slow] })).toEqual([]);
@@ -293,8 +317,8 @@ describe.each(PROCESS_BACKENDS)("/status through the process validates in every 
     // A core with no transport and no lockstep list: no private instance.
     expect(shown).toMatchObject({ state: "following", instance: { role: "core", id: null }, public: null, ledger: null, privateInstances: [] });
     // The in-memory source keeps no best-block queue and hears no best head. The process's node client, which it never
-    // uses, has not connected: it shows `connecting`, as before the first connection.
-    expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false });
+    // uses, has not connected: it shows `connecting`, as before the first connection, and has counted no call.
+    expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false, calls: {} });
     const committed = Date.parse(shown.lastCommitAt);
     expect(committed).toBeGreaterThanOrEqual(before);
     expect(committed).toBeLessThanOrEqual(after);

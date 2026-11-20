@@ -581,7 +581,8 @@
         "retries",
         "queueDepth",
         "tipCap",
-        "finalityStall"
+        "finalityStall",
+        "calls"
       ],
       "properties": {
         "finalizedHead": {
@@ -625,6 +626,77 @@
         },
         "finalityStall": {
           "type": "boolean"
+        },
+        "calls": {
+          "description": "The node client's counts since the process made it (FR-015 of the node call budget), per allowed node method it used: calls made, tries sent (retries included), request frames sent, and calls that ended without an answer by code; null only before the process made its node client.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "chain_subscribeNewHeads",
+                  "chain_subscribeFinalizedHeads",
+                  "chain_getFinalizedHead",
+                  "chain_getBlockHash",
+                  "chain_getBlock",
+                  "chain_getHeader",
+                  "state_getStorage",
+                  "state_getKeysPaged",
+                  "state_getMetadata",
+                  "state_getRuntimeVersion",
+                  "midnight_ledgerStateRoot",
+                  "system_properties"
+                ]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/nodeMethodCounts"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "nodeMethodCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calls",
+        "attempts",
+        "frames",
+        "failures"
+      ],
+      "properties": {
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failures": {
+          "type": "object",
+          "propertyNames": {
+            "enum": [
+              "node-unreachable",
+              "node-error",
+              "node-requirement",
+              "handle-closed",
+              "aborted",
+              "other"
+            ]
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       }
     },

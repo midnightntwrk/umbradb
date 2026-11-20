@@ -35,7 +35,9 @@
  * repeat) are listed too.
  *
  * The node client sends single calls only today: one request is one frame, and a retry is a new request, so these are
- * also the frames the node received.
+ * also the frames the node received. Beside the log, the script reads the process's node client's own counts
+ * (`NodeClient.calls`, `src/node/counts.ts`, what `/status` shows as `node.calls`) once the run stopped, and prints
+ * whether each method's attempts equal the requests the tape node logged for it.
  *
  * Exit codes: 0 when the run reached `--stop`; 1 when it did not; 2 for a usage error.
  */
@@ -48,6 +50,7 @@ import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-blo
 import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
 import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
+import { NodeClient } from "../../src/node/client.js";
 import { readTape, type TapeCall, type TapeRecord, tapeId } from "../../tools/tape/index.js";
 import { bigintText, committed, ingest } from "../../test/backbone/ingest-harness.js";
 import { cappedAt, devnetSettings, LEDGER_CORE } from "../../test/backbone/ledger-restart.js";
@@ -184,7 +187,14 @@ let exitCode = 1;
 try {
   const db = { setting: { kind: "pglite" as const, path: join(root, "db") }, query: async () => [] };
   const began = performance.now();
-  const run = await ingest(db, records, { start, stop, core, settings });
+  let client: NodeClient | undefined;
+  const run = await ingest(db, records, {
+    start,
+    stop,
+    core,
+    settings,
+    nodeClient: (options) => (client = new NodeClient(options)),
+  });
   let status;
   try {
     await committed(run, stop, PATIENCE_MS);
@@ -244,6 +254,21 @@ try {
     out.push(`Outcomes other than answered/subscribed: ${[...outcomes].map(([key, n]) => `${key} ×${n}`).join(", ")}`);
   }
   if (status.reason !== null) out.push(`Reason: ${JSON.stringify(status.reason, bigintText)}`);
+  // The client's own counts against the tape node's log: each method's attempts are the requests the node received.
+  const counted = client?.calls ?? {};
+  const differ = [...new Set([...rows.keys(), ...Object.keys(counted)])].filter(
+    (method) => (counted as Record<string, { attempts: number } | undefined>)[method]?.attempts !== rows.get(method)?.total,
+  );
+  const sumOf = (field: "calls" | "attempts" | "frames"): number =>
+    Object.values(counted).reduce((n, counts) => n + (counts?.[field] ?? 0), 0);
+  const failures = Object.values(counted).reduce(
+    (n, counts) => n + Object.values(counts?.failures ?? {}).reduce((a, b) => a + b, 0),
+    0,
+  );
+  out.push(
+    `Node client's counts: ${sumOf("calls")} calls, ${sumOf("attempts")} attempts, ${sumOf("frames")} frames, ` +
+      `${failures} failed; attempts ${differ.length === 0 ? "equal the tape node's log for every method" : `differ from the log for ${differ.join(", ")}`}`,
+  );
   process.stdout.write(`${out.join("\n")}\n`);
 
   if (values.json !== undefined) {
@@ -261,6 +286,7 @@ try {
       seconds,
       methods: Object.fromEntries(sorted),
       outcomes: Object.fromEntries(outcomes),
+      client: counted,
     };
     writeFileSync(values.json, `${JSON.stringify(report, null, 2)}\n`);
   }

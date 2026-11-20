@@ -1721,8 +1721,8 @@ class Process implements ProcessHandle {
   }
 
   /**
-   * What `/status` shows of the node besides `status()`: the node client's connection state, and the best head
-   * announced last and the queue's depth as the block source reports them (`nodeView`); null without them.
+   * What `/status` shows of the node besides `status()`: the node client's connection state and call counts, and the
+   * best head announced last and the queue's depth as the block source reports them (`nodeView`); null without them.
    */
   #nodeFacts(): NodeFacts {
     const view = this.#source?.nodeView?.();
@@ -1730,6 +1730,7 @@ class Process implements ProcessHandle {
       bestHead: view?.bestHead ?? null,
       connection: this.#nodeClient?.connection ?? null,
       queueDepth: view?.queueDepth ?? null,
+      calls: this.#nodeClient?.calls ?? null,
     });
   }
 

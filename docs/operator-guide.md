@@ -138,6 +138,16 @@ On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` w
 - `tipCap`: the most best blocks the queue holds (the `core` entry's `tipCap`).
 - `finalityStall`: whether the queue is full, so that new best blocks wait for finality (the condition
   `finality-stall`).
+- `calls`: what the process asked of the node since it started, per method, for measuring a request budget (a
+  provider's daily quota). Each method the process used has `calls` (the calls made, each counted once however often it
+  was tried; a subscription is a call, and so is each one made again after a reconnect; a notification is not),
+  `attempts` (the tries sent, retries included; a try that found no connection sent nothing and is not one), `frames`
+  (the request frames those tries went in: one per try, since the process sends one call per frame) and `failures` (the
+  calls that ended without an answer after any retries, by code: `node-unreachable`, `node-error`, `node-requirement`,
+  `handle-closed`, `aborted` for a call the process itself ended, such as a prefetched root at a stop, and `other`). A
+  method never used is absent, and so is a failure code with none. The counts start from 0 each time the process
+  starts. Null only for the moment before the process makes its client. A provider that bills per request counts the
+  attempts; the requests per block are `attempts` over the heights committed.
 
 A private process has no node: its `node` is null. The process publishes what `/status` shows at least once a second,
 and at once when the connection's state changes.
@@ -440,6 +450,7 @@ that height.
 | `backMs` | From the worker posting an answer to the main thread handling it. |
 | `nodeNoticeMs`, `nodeReadMs`, `nodeReads` | The worker's requests for stored nodes: from the worker posting one to the main thread handling it, from then to the worker woken, and how many. |
 | `mem` | The main thread's memory in MiB: its JavaScript heap in use, what it holds outside the heap, and the process's resident set. |
+| `node` | The node requests since the line before, per method: `[calls, attempts, frames, failures]` as `/status`'s `node.calls` counts them (failures of all codes together). A height that does not commit keeps them for the next line, so the lines together hold every request until the last line; a run's first line also holds the startup's. Absent when nothing was sent since the line before. |
 
 Later changes may add keys to a line for the work they measure; the files and the shape of a line do not change.
 

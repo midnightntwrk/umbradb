@@ -121,7 +121,7 @@ export function statusSnapshot(given: Partial<StatusSnapshot> = {}): StatusSnaps
     reason: null,
     instance: { role: "core", id: null },
     lastCommitAt: null,
-    node: { finalizedHead: "3", bestHead: null, connection: null, retries: 0, queueDepth: null, tipCap: 600, finalityStall: false },
+    node: { finalizedHead: "3", bestHead: null, connection: null, retries: 0, queueDepth: null, tipCap: 600, finalityStall: false, calls: null },
     modules: null,
     ledger: null,
     privateInstances: null,
