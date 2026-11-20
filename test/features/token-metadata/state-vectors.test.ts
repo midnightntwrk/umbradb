@@ -7,6 +7,7 @@ import { fromHex } from "../../../src/features/token-metadata/codec/index.js";
 import { PGlite } from "@electric-sql/pglite";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
 import { cellData, log, runTo } from "./harness.js";
+import { statementText } from "../../../src/db/repeated-statements.js";
 import { type Json, stateInput, stateResponse } from "./vector-adapter.js";
 import { compareState } from "./vector-runner/compare.js";
 import { loadVectors, requestFor } from "./vector-runner/runner-core.js";
@@ -113,7 +114,7 @@ async function servedState(backend: ProcessBackend, db: ProcessDatabase, network
       await engine.close();
     }
   };
-  return (await read(async (r) => servedIdentities({ query: (sql) => r.query(sql) }, network))) as Awaited<ReturnType<typeof servedIdentities>>;
+  return (await read(async (r) => servedIdentities({ query: (sql) => r.query(statementText(sql)) }, network))) as Awaited<ReturnType<typeof servedIdentities>>;
 }
 
 /** A state response in a fixed order (identities by identity, groups by content), to compare two consumers exactly. */

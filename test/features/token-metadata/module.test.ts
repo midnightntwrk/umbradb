@@ -8,6 +8,7 @@ import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-back
 import type { ContractLog } from "../../../src/backbone/contract-logs/contract-logs.js";
 import { cursorReaches } from "../../library/library-fixtures.js";
 import type { ProcessDatabase } from "../../runner/process-backends.js";
+import { statementText, type Statement } from "../../../src/db/repeated-statements.js";
 import { blockLogs, contract, domain, eventData, miscData, runTo, startRun, TEST_LOGS_ID } from "./harness.js";
 
 /**
@@ -129,7 +130,8 @@ describe("token-metadata's on-start-db", () => {
     return {
       asked,
       height: null,
-      query: async (sql: string, params: readonly unknown[] = []) => {
+      query: async (statement: Statement, params: readonly unknown[] = []) => {
+        const sql = statementText(statement);
         asked.push(sql);
         if (sql === STATEMENTS.databaseStart) return s === null ? [] : [{ start_height: s }];
         if (sql === STATEMENTS.providerRevisions) return [...(stored.providers ?? [{ start: s ?? 0n, stop: null }])];
