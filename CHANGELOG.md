@@ -40,6 +40,13 @@ adheres to [Semantic Versioning](https://semver.org/).
   and records it, and every later start is held to the recorded one (`genesis-mismatch` for a node restarted from a
   new genesis). Its ledger table is the official networks'. A private process of `undeployed` takes its public
   database's genesis. `token-metadata`'s latest start on it is 0.
+- Node call counts: the node client counts, per method, the calls made, the tries sent, the frames they went in and
+  the calls that failed, by code. `/status` shows them as `node.calls` and the batches as `node.batches`
+  (`{ frames, refused }`); the block trace (`UMBRADB_TRACE`) adds a `node` key to each height's line.
+  `scripts/call-budget/count.ts` replays a recorded tape through the tape node and prints the calls per method and
+  per block, the frames, and a fingerprint of the stored tables.
+- Core settings `ledgerRootInterval` (default 600) and `nodeBatchBlocks` (default 8), both operational. Set both to 1
+  for the previous behaviour.
 
 ### Changed
 
@@ -47,6 +54,22 @@ adheres to [Semantic Versioning](https://semver.org/).
   `partial-transaction`) as an unresolved site, in the new table `contract_logs.unresolved` (the shared item's
   migration `002`) and in the `contract-logs` block item, instead of halting with `fast-log-unsupported`, which is
   removed.
+- Fewer node calls per block: about 3 in a catch-up and 2 at the tip, down from 4 without the ledger state and 5 with
+  it. Stored data is unchanged.
+  - The runtime version is asked once per runtime, at its first block, not at every block. A block whose extrinsics or
+    events do not decode with the cached metadata gets the full runtime check before its error is reported.
+  - `core-ledger-state` compares its root with the node's at block 0, every `ledgerRootInterval` blocks, each run's
+    first height and each ledger or runtime change, not at every block. A mismatch is found up to
+    `ledgerRootInterval − 1` blocks late; `root-mismatch` names `lastMatchedHeight`, and recovery is a backup restore
+    at or below it. `/status` `ledger` is now `{ lastRootMatch }` once a check passed (it was always `null`).
+  - While following the tip, finalized hashes come from the finalized-head notifications and the queued best blocks,
+    not from `chain_getBlockHash` per height. Every hash learned is checked against the one known at its height.
+  - The calls made together go to the node as one JSON-RPC batch frame (up to `nodeBatchBlocks` blocks' calls). A node
+    that refuses a batch, or answers none of it, gets single calls for the rest of that connection; the calls are sent
+    again on their own (`node-unreachable`, reason `batch-refused`).
+- Nothing is fetched above the core's `stop` or an upgrade boundary.
+- The tape node answers JSON-RPC batch frames (`batches: false` keeps the old −32600 refusal). The tape recorder still
+  takes no batches: record with `nodeBatchBlocks: 1`.
 
 ## [0.10.0] - 2026-10-27
 
