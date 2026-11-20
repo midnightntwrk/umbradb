@@ -22,7 +22,7 @@ describe("the refusal and halt registry", () => {
     expect(refusal).toHaveLength(52);
     // Ten backup and restore codes, and `private-binding-mismatch` for a private process's backup.
     expect(backup).toHaveLength(11);
-    expect(halt).toHaveLength(19);
+    expect(halt).toHaveLength(18);
     for (const list of [refusal, backup, halt]) expect(new Set(list).size).toBe(list.length);
     for (const word of ["refused", "halted", ...POINTS]) expect([...refusal, ...backup, ...halt]).not.toContain(word);
     // The codes reasons keep are the lists' codes that are UmbraError codes; the one halt code no UmbraError carries is

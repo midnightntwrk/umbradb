@@ -23,19 +23,22 @@ export interface Surface {
 export const EXPORTED_SURFACE: Surface = Object.freeze({
   values: Object.freeze([
     "CORE_BLOCK_PARSED", "CORE_CHAIN_EVENTS", "CORE_CONTRACT_LOGS_FAST", "CORE_CONTRACT_LOGS_FULL",
-    "CORE_CONTRACT_STATES", "CORE_LEDGER_STATE", "CORE_TX_RESULTS", "InMemoryBlockSource", "POINTS", "RouteError", "UmbraError",
-    "answerChainData", "bigintText", "chainDataHeaders", "contentsHash", "coreEntry", "cursorTable", "defineConfig", "defineModule",
-    "defineRoute", "encodeCanonical", "encodeRow", "finalizedHeight", "heightVersionedTable", "hexBytes", "invalidRequest",
-    "messagePortChannel", "pageCursor", "readChainDataView", "retainedStatesOf", "startUmbraDB", "uintText",
-    "versionEntry", "withViewExtensions",
+    "CORE_CONTRACT_STATES", "CORE_LEDGER_STATE", "CORE_TX_RESULTS", "InMemoryBlockSource", "POINTS", "RouteError",
+    "TOKEN_METADATA", "TOKEN_METADATA_API", "TokenMetadataRevisionGap", "TokenMetadataStartAfterDatabase",
+    "UmbraError", "answerChainData", "bigintText", "chainDataHeaders", "contentsHash", "contractLogsItemOf",
+    "coreEntry", "cursorTable", "defineConfig", "defineModule", "defineRoute", "encodeCanonical", "encodeRow",
+    "finalizedHeight", "heightVersionedTable", "hexBytes", "invalidRequest", "messagePortChannel", "pageCursor",
+    "readChainDataView", "retainedStatesOf", "startUmbraDB", "uintText", "unresolvedLogSitesOf", "versionEntry",
+    "withViewExtensions",
   ]),
   types: Object.freeze([
-    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockRun", "BlockWriteHandle", "CoreVersion", "Entry", "ErrorCode",
-    "FieldKind", "FieldSchema", "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
-    "MessagePortLike", "Migration", "ModuleDeclaration", "NodeHttpHandler", "NodeUpgradeHandler", "PageCursor", "ParsedTransaction",
-    "PointCallbacks", "PointName", "PrivateLinkChannel", "ProcessContext", "ReadHandle", "Revision", "Route",
-    "RouteContext", "RouteErrorKind", "SchemaWriteHandle", "UmbraConfig", "UmbraDBBackup", "UmbraDBCondition", "UmbraDBEnd", "UmbraDBHandle", "UmbraDBNetwork",
-    "UmbraDBOptions", "UmbraDBReason", "UmbraDBStarted", "UmbraDBStatus",
+    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockRun", "BlockWriteHandle", "ContractLog", "CoreVersion",
+    "Entry",     "ErrorCode", "FieldKind", "FieldSchema", "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
+    "MessagePortLike", "Migration", "ModuleDeclaration", "NodeHttpHandler", "NodeUpgradeHandler", "PageCursor",
+    "ParsedTransaction", "PointCallbacks", "PointName", "PrivateLinkChannel", "ProcessContext", "ReadHandle",
+    "Revision", "Route", "RouteContext", "RouteErrorKind", "SchemaWriteHandle", "UmbraConfig", "UmbraDBBackup",
+    "UmbraDBCondition", "UmbraDBEnd", "UmbraDBHandle", "UmbraDBNetwork", "UmbraDBOptions", "UmbraDBReason",
+    "UmbraDBStarted", "UmbraDBStatus", "UnresolvedLogSite",
   ]),
 });
 

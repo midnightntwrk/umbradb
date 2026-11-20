@@ -85,6 +85,7 @@ const DECLARATION_PROPERTIES = [
   "requires",
   "provides",
   "startsMidChain",
+  "latestStarts",
   "needsLockstep",
   "developmentOnly",
   "configSchema",
@@ -421,6 +422,16 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
   });
 
   shape.boolean(value, "startsMidChain", true);
+  const latestStarts = value.latestStarts;
+  if (latestStarts !== undefined) {
+    const expected = "nothing, or an object of network names to non-negative integer heights";
+    if (latestStarts === null || typeof latestStarts !== "object" || Array.isArray(latestStarts)) {
+      shape.wrong("latestStarts", latestStarts, expected);
+    }
+    for (const [network, height] of Object.entries(latestStarts as Record<string, unknown>)) {
+      if (!Number.isSafeInteger(height) || (height as number) < 0) shape.wrong(`latestStarts.${network}`, height, expected);
+    }
+  }
   shape.boolean(value, "needsLockstep", false);
   if (value.side === "public" && value.needsLockstep !== undefined) {
     // Only a private module can run in lockstep with the public side.

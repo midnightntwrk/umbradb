@@ -112,6 +112,14 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name", (b
     let cursorDuringDrop: bigint | null;
     let reconnectedAt: number;
     const address = core.transport();
+    const disconnects = () => core.lines.filter((line) => line === "transport: instance instance-1 disconnected").length;
+    const transportLog = () => core.lines.filter((line) => line.startsWith("transport:")).join("\n");
+    /** Waits up to 30 s for the core to have logged `n` disconnects of the instance, then checks it has. */
+    const disconnected = async (n: number) => {
+      const deadline = Date.now() + 30_000;
+      while (disconnects() < n && Date.now() < deadline) await sleep(20);
+      expect(disconnects(), transportLog()).toBe(n);
+    };
     try {
       await running.handle.started;
       await running.reach(BigInt(FROM));
@@ -119,6 +127,9 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name", (b
       await core.advance(BigInt(FROM + 1));
       await running.reach(BigInt(FROM + 1));
       proxy.drop();
+      // The core sees the dropped connection go before any reconnection can reach it: a reconnection that came first
+      // would be refused as a duplicate of the connection the core still holds (see private-transport.ts).
+      await disconnected(1);
       await core.advance(BigInt(TO));
       // Time for anything else that could wake the private process to do so (14.1's poll would, every second).
       await sleep(3_000);
@@ -127,12 +138,9 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name", (b
       proxy.connect();
       await running.reach(BigInt(TO));
       await running.stop();
-      // The private process's stop closed its connection: the core sees it go.
-      const deadline = Date.now() + 20_000;
-      const disconnects = () => core.lines.filter((line) => line === "transport: instance instance-1 disconnected").length;
-      while (disconnects() < 2 && Date.now() < deadline) await sleep(20);
-      // Before the core stops (which would close every connection itself).
-      expect(disconnects()).toBe(2);
+      // The private process's stop closed its connection: the core sees it go, before the core stops (which would close
+      // every connection itself).
+      await disconnected(2);
     } finally {
       await running.stop();
       await proxy.close();

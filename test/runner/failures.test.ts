@@ -43,7 +43,7 @@ describe("the codes reasons keep", () => {
       "unsupported-key-type", "upgrade-required", "writer-lock-held",
     ]);
     expect([...HALT_CODES].sort()).toEqual([
-      "bad-version-digest", "callback-error", "database-error", "duplicate-block-hash", "fast-log-unsupported",
+      "bad-version-digest", "callback-error", "database-error", "duplicate-block-hash",
       "finality-conflict", "ledger-refcount-invalid", "lockstep-behind", "metadata-mismatch", "node-requirement",
       "parent-mismatch", "pin-mismatch", "public-config-changed", "report-hash-mismatch", "root-mismatch",
       "truncate-not-allowed", "unknown-runtime", "writer-lock-lost",

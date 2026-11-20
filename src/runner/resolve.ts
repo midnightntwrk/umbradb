@@ -41,6 +41,7 @@ import { CORE_ENTRY_ID } from "../config/entries.js";
 import { UmbraError } from "../db/errors.js";
 import { type PlainData, plainData } from "../config/plain-data.js";
 import { secretStrings } from "../config/redact.js";
+import { type LoweredStart, withLatestStarts } from "../config/latest-start.js";
 import { processCoreEntry } from "../config/process.js";
 import {
   type CheckedConfig,
@@ -240,6 +241,8 @@ export interface ResolvedConfig {
   readonly core: CheckedEntry;
   /** The addresses that revision writes, before defaults. */
   readonly surfaces: Surfaces;
+  /** Where a module's latest start moved the database's start (`../config/latest-start.ts`), or null. */
+  readonly lowered: LoweredStart | null;
 }
 
 /**
@@ -301,9 +304,10 @@ export function resolveConfig(input: ConfigStageInput): ResolvedConfig {
   };
   const secrets = configSecrets(validation);
   try {
-    const checked = validateConfig(validation);
+    const declarations = [...input.declarations.backbone, ...input.declarations.core, ...input.declarations.user];
+    const { config: checked, lowered } = withLatestStarts(validateConfig(validation), declarations);
     const core = (input.processCore ?? processCoreEntry)(checked);
-    return Object.freeze({ checked, side, core, surfaces: surfacesOf(data, core, side) });
+    return Object.freeze({ checked, side, core, surfaces: surfacesOf(data, core, side), lowered });
   } catch (error) {
     throw carrying(error, secrets);
   }

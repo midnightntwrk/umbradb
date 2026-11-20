@@ -36,6 +36,11 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from 
  *   an oversized one gives none.
  * - Logs are numbered in the block. Their logical segment is the ledger's, 0 for every contract log: the guaranteed
  *   section's source is segment 0, and the fallible section's is `logical_segment: GUARANTEED_SEGMENT`.
+ * - With `-fast` (`fastLogs`, `unresolved`), each `log` site of a v9 call that ran is, in the same order: a log, for a
+ *   literal (none for an oversized one); an unresolved site `not-a-literal`, for a `log` of the tail (a value read from
+ *   the contract's state); an unresolved site `partial-transaction`, for a literal of a partial success's fallible
+ *   transcript (none for an oversized one). Logs and unresolved sites are numbered in the block by one count. Each
+ *   call is its intent's only action, in segment 1 (`callTransaction`), so a site's segment is 1 and its call 0.
  * - The reference replay's `ContractLog` events of each transaction are counted against the logs
  *   ({@link contractScenario} refuses a scenario that disagrees).
  * - The contract-state rows expected are those of every contract a block's transactions deploy, call or maintain (a
@@ -94,12 +99,22 @@ export interface ContractScenarioOptions {
 /** A row of `contract_logs.logs`, as text: `height tx log address entry segment version type data` (hex without `0x`). */
 export type LogLine = string;
 
+/**
+ * A row of `contract_logs.unresolved`, as text: `height tx log address entry reason segment fallible call op` (hex
+ * without `0x`, `fallible` as `true` or `false`).
+ */
+export type UnresolvedLine = string;
+
 /** A scenario and what its tables must hold. */
 export interface ContractScenario {
   readonly scenario: LedgerScenario;
   readonly contracts: readonly ContractFixture[];
-  /** The rows of `contract_logs.logs` from block 0 to the head, in key order. */
+  /** The rows of `contract_logs.logs` with `-full`, from block 0 to the head, in key order. */
   readonly logs: readonly LogLine[];
+  /** The rows of `contract_logs.logs` with `-fast` (see the module comment). */
+  readonly fastLogs: readonly LogLine[];
+  /** The rows of `contract_logs.unresolved` with `-fast` (see the module comment); `-full` writes none. */
+  readonly unresolved: readonly UnresolvedLine[];
   /** By height, the contracts (`0x` hex, byte order) whose row of `core_contract_states.states` the block writes. */
   readonly states: ReadonlyMap<bigint, readonly string[]>;
 }
@@ -185,6 +200,8 @@ export async function contractScenario(options: ContractScenarioOptions): Promis
     ...(options.rootsOnly === true ? { rootsOnly: true } : {}),
   });
   const logs: LogLine[] = [];
+  const fastLogs: LogLine[] = [];
+  const unresolvedRows: UnresolvedLine[] = [];
   const states = new Map<bigint, string[]>();
   const deployed: string[] = [];
   options.blocks.forEach((txs, i) => {
@@ -193,6 +210,7 @@ export async function contractScenario(options: ContractScenarioOptions): Promis
     const reference = scenario.heights[i + 1] as LedgerScenario["heights"][number];
     const touched = new Set<string>();
     let index = 0;
+    let fastIndex = 0;
     txs.forEach((tx, t) => {
       const type = reference.types[t];
       if (tx.kind === "other") return;
@@ -217,14 +235,41 @@ export async function contractScenario(options: ContractScenarioOptions): Promis
       if ((tx.tail === undefined || tx.tailLogs !== undefined) && counted !== literalCount) {
         throw new Error(`contractScenario: transaction ${t} at ${height} emitted ${counted} contract logs, not ${literalCount}: a fixture problem`);
       }
+      const contract = plain(tx.contract.address);
+      const entry = plain(utf8(tx.entryPoint ?? "emit"));
       for (const item of decoded) {
-        logs.push([height, t, index++, plain(tx.contract.address), plain(utf8(tx.entryPoint ?? "emit")), 0, item.version, item.eventType, plain(item.data)].join(" "));
+        logs.push([height, t, index++, contract, entry, 0, item.version, item.eventType, plain(item.data)].join(" "));
+      }
+      if (ledger !== "v9" || outcome === "failure") return;
+      for (const site of sitesOf(tx)) {
+        const item = site.value === undefined ? undefined : decodedLog(site.value);
+        if (item === null) continue;
+        const unresolved = (reason: string) =>
+          unresolvedRows.push([height, t, fastIndex++, contract, entry, reason, 1, site.fallible, 0, site.op].join(" "));
+        if (item === undefined) unresolved("not-a-literal");
+        else if (outcome === "partial" && site.fallible) unresolved("partial-transaction");
+        else fastLogs.push([height, t, fastIndex++, contract, entry, 0, item.version, item.eventType, plain(item.data)].join(" "));
       }
     });
     if (options.upgradeAt !== undefined && i + 1 === options.upgradeAt) for (const address of deployed) touched.add(address);
     if (touched.size > 0) states.set(height, [...touched].sort());
   });
-  return { scenario, contracts: [...contracts.values()], logs, states };
+  return { scenario, contracts: [...contracts.values()], logs, fastLogs, unresolved: unresolvedRows, states };
+}
+
+/**
+ * The `log` sites of `call`'s transcripts in the ledger's order, with each one's op (`programsOf`' programs: a literal
+ * is a `push` and a `log`; the fallible transcript starts with `ckpt`) and its literal value; a `log` of the tail has
+ * none, since a scenario's tail logs only values read from the contract's state.
+ */
+function sitesOf(call: CallTx): { value: v9.EncodedStateValue | undefined; fallible: boolean; op: number }[] {
+  const literals = call.logs ?? [];
+  const tail = (call.tail ?? []).flatMap((op, j) => (op === "log" ? [{ value: undefined, fallible: false, op: 2 * literals.length + j }] : []));
+  return [
+    ...literals.map((value, k) => ({ value, fallible: false, op: 2 * k + 1 })),
+    ...tail,
+    ...(call.fallibleLogs ?? []).map((value, k) => ({ value, fallible: true, op: 2 * k + 2 })),
+  ];
 }
 
 /** The rows of `contract_logs.logs`, as {@link LogLine}s in key order. */
@@ -271,30 +316,27 @@ export async function logProblems(db: ProcessDatabase, status: ProcessStatus, ex
   return [...reachedProblems(status, expected.scenario.head), ...lineProblems(await logLines(db), expected.logs)];
 }
 
+/** The rows of `contract_logs.unresolved`, as {@link UnresolvedLine}s in key order. */
+export async function unresolvedLines(db: Pick<ProcessDatabase, "query">): Promise<UnresolvedLine[]> {
+  const rows = await db.query(
+    `SELECT height::text AS h, tx_index::text AS t, log_index::text AS i, encode(contract_address, 'hex') AS a,
+       encode(entry_point, 'hex') AS e, reason AS r, segment::text AS s, fallible::text AS f, call_index::text AS c, op_index::text AS o
+     FROM contract_logs.unresolved ORDER BY height, tx_index, log_index`,
+  );
+  return rows.map((row) => [row.h, row.t, row.i, row.a, row.e, row.r, row.s, row.f, row.c, row.o].join(" "));
+}
+
 /**
- * The `-fast` halt oracle: processing halted at `height` with `fast-log-unsupported`, naming `core-contract-logs-fast`,
- * `on-parse` and the transaction. The rows below it are the expected ones, and there are none at or above it.
+ * The `-fast` oracle: the process reached the head, and `contract_logs.logs` and `contract_logs.unresolved` hold
+ * exactly the scenario's `-fast` rows (see the module comment). Each missing and each extra row is named, an
+ * unresolved one as `unresolved row …`.
  */
-export async function haltProblems(
-  db: ProcessDatabase,
-  status: ProcessStatus,
-  expected: ContractScenario,
-  height: bigint,
-  transaction: number,
-  detail: string | undefined,
-): Promise<string[]> {
-  const problems: string[] = [];
-  const reason = status.reason;
-  if (status.state !== "halted" || reason === null) problems.push(`the process is ${status.state}, not halted`);
-  else {
-    if (reason.code !== "fast-log-unsupported") problems.push(`it halted with ${reason.code}, not fast-log-unsupported`);
-    if (reason.height !== height) problems.push(`it halted at ${reason.height}, not ${height}`);
-    if (reason.module !== "core-contract-logs-fast" || reason.point !== "on-parse") problems.push(`it halted in ${reason.module} at ${reason.point}`);
-  }
-  if (status.cursor !== height - 1n) problems.push(`the cursor is ${status.cursor}, not ${height - 1n}`);
-  if (detail !== undefined && !detail.includes(`transaction ${transaction} `)) problems.push(`the halt does not name transaction ${transaction}: ${detail}`);
-  problems.push(...lineProblems(await logLines(db), linesBetween(expected.logs, 0n, height - 1n)));
-  return problems;
+export async function fastProblems(db: ProcessDatabase, status: ProcessStatus, expected: ContractScenario): Promise<string[]> {
+  return [
+    ...reachedProblems(status, expected.scenario.head),
+    ...lineProblems(await logLines(db), expected.fastLogs),
+    ...lineProblems(await unresolvedLines(db), expected.unresolved).map((problem) => problem.replace(" log row ", " unresolved row ")),
+  ];
 }
 
 /** The rows of `core_contract_states.states`: by height, the contracts (`0x` hex, byte order) with their keys. */
@@ -418,9 +460,10 @@ export async function a109Scenario(): Promise<ContractScenario> {
 }
 
 /**
- * The `-fast` halt scenario: literal logs at 2 and 4, and at 3 a literal log then a log of the contract's state.
+ * The state-log scenario: literal logs at 2 and 4, and at 3 a literal log then a log of the contract's state, which
+ * `-full` stores and `-fast` records as unresolved (`not-a-literal`).
  */
-export async function a110HaltScenario(): Promise<ContractScenario> {
+export async function stateLogScenario(): Promise<ContractScenario> {
   const [contract] = await contractsFor("v9", 1);
   const call = (byte: number) => ({ kind: "call" as const, contract: contract!, logs: [cellValue(Uint8Array.of(byte))] });
   return contractScenario({
@@ -430,6 +473,33 @@ export async function a110HaltScenario(): Promise<ContractScenario> {
       [call(1)],
       [call(2), { ...call(3), tail: LOG_STATE, tailLogs: [{ tag: "array", content: [] }] }],
       [call(4)],
+    ],
+  });
+}
+
+/**
+ * The numbering scenario: at 2, a partial success whose failed fallible transcript logs a literal, between a log of
+ * its own guaranteed transcript and a later transaction's log; at 3, a log of the contract's state between two
+ * literal logs. At 2 `-full` stores no log of the failed segment, so its later log is number 1, while `-fast` records
+ * the fallible site unresolved as number 1 and the later log as number 2. At 3 both number alike, since the state's
+ * log is emitted. At 4 a plain literal log is the same row with both.
+ */
+export async function numberingScenario(): Promise<ContractScenario> {
+  const [one, two] = await contractsFor("v9", 2);
+  const cell = (byte: number) => cellValue(Uint8Array.of(byte));
+  return contractScenario({
+    ledger: "v9",
+    blocks: [
+      [{ kind: "deploy", contract: one! }, { kind: "deploy", contract: two! }],
+      [
+        { kind: "call", contract: one!, logs: [cell(1)], fallibleLogs: [cell(2)], fallibleFails: true },
+        { kind: "call", contract: two!, logs: [cell(3)] },
+      ],
+      [
+        { kind: "call", contract: two!, logs: [cell(4)], tail: LOG_STATE, tailLogs: [{ tag: "array", content: [] }] },
+        { kind: "call", contract: one!, logs: [cell(5)] },
+      ],
+      [{ kind: "call", contract: one!, logs: [cell(6)] }],
     ],
   });
 }

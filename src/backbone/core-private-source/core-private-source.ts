@@ -173,13 +173,15 @@ export function publicNotStarted(): UmbraError {
  * retried) of a public database whose identity `current` has a different genesis hash than the configured network's.
  * `configured` is `configuredGenesisOf` of the process's `core` revision, and the hashes are compared whole. A known
  * network whose built-in table records no genesis hash is refused too, since nothing can be checked against it; the
- * core refuses it the same way. Null when the hashes are equal.
+ * core refuses it the same way. A local network (`undeployed`) takes the public database's genesis: each local chain
+ * has its own, and the binding check holds every later start to the one recorded. Null when the hashes are equal.
  */
 export function networkRefusal(
   configured: ConfiguredGenesis,
   current: PublicIdentity,
   of: "public-database" | "transport" = "public-database",
 ): UmbraError | null {
+  if (configured.local) return null;
   const publicHash = hex(current.genesisHash);
   if (configured.hash === null) {
     return new UmbraError(

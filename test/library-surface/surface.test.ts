@@ -24,9 +24,9 @@ const INDEX = path.join(fileURLToPath(new URL("../../", import.meta.url)), "src/
 const expected = EXPORTED_SURFACE;
 
 describe("src/index.ts exports exactly the pinned surface", () => {
-  it("the pinned surface is 34 values and 43 types, sorted, the core modules' declarations among the values", () => {
-    expect(expected.values).toHaveLength(34);
-    expect(expected.types).toHaveLength(43);
+  it("the pinned surface is 40 values and 45 types, sorted, the core modules' declarations among the values", () => {
+    expect(expected.values).toHaveLength(40);
+    expect(expected.types).toHaveLength(45);
     expect([...expected.values].sort()).toEqual(expected.values);
     expect([...expected.types].sort()).toEqual(expected.types);
     for (const name of Object.keys(CORE_MODULE_EXPORTS)) expect(expected.values).toContain(name);
@@ -41,6 +41,18 @@ describe("src/index.ts exports exactly the pinned surface", () => {
 
   it("at run time the barrel holds exactly the pinned values", () => {
     expect(runtimeValues(umbra)).toEqual(expected.values);
+  });
+
+  it("exports the token-metadata module's declaration, with its id and entry builder, and its start-after-database error", () => {
+    expect(umbra.TOKEN_METADATA.id).toBe("token-metadata");
+    expect(umbra.TOKEN_METADATA.entry({ start: 0, config: {} }).id).toBe("token-metadata");
+    expect(typeof umbra.TokenMetadataStartAfterDatabase).toBe("function");
+  });
+
+  it("exports the token-metadata-api module's declaration, with its id and entry builder, requiring the indexer's tables", () => {
+    expect(umbra.TOKEN_METADATA_API.id).toBe("token-metadata-api");
+    expect(umbra.TOKEN_METADATA_API.entry({ start: 0, config: {} }).id).toBe("token-metadata-api");
+    expect(umbra.TOKEN_METADATA_API.requires).toEqual(["token-metadata-state"]);
   });
 
   it("each core module's declaration has its module's id and an entry builder a configuration writes", () => {

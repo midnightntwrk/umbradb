@@ -55,7 +55,7 @@ export const REFUSALS_AND_HALTS: RefusalsAndHalts = Object.freeze({
   halt: Object.freeze([
     "callback-error", "database-error", "parent-mismatch", "finality-conflict", "node-requirement",
     "duplicate-block-hash", "unknown-runtime", "bad-version-digest", "pin-mismatch", "metadata-mismatch",
-    "root-mismatch", "ledger-refcount-invalid", "fast-log-unsupported", "unexpected-cursor", "writer-lock-lost",
+    "root-mismatch", "ledger-refcount-invalid", "unexpected-cursor", "writer-lock-lost",
     "truncate-not-allowed", "lockstep-behind", "report-hash-mismatch", "public-config-changed",
   ]),
 });
@@ -524,16 +524,6 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   ],
   "halt:truncate-not-allowed": [
     { file: `${RUNNER}/halts.test.ts`, test: "a TRUNCATE in on-db-write halts with truncate-not-allowed, the module and the point"},
-  ],
-  "halt:fast-log-unsupported": [
-    {
-      file: "test/backbone/contract-data.test.ts",
-      test: "a log of a value read from the contract's state makes -fast halt with fast-log-unsupported at its height, naming the transaction; -full stores it",
-    },
-    {
-      file: "test/backbone/contract-data.test.ts",
-      test: "any log of a partially successful transaction makes -fast halt with fast-log-unsupported",
-    },
   ],
   "halt:lockstep-behind": [
     {

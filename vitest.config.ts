@@ -54,6 +54,8 @@ const CORE_ARCH = {
   "**/src/private/**": { lines: 90, branches: 85, perFile: true },
   // The default for `src/**`, added with the library entry's directory.
   "**/src/library/**": { lines: 90, branches: 85, perFile: true },
+  // Public modules shipped with the package (token-metadata): the default for `src/**`.
+  "**/src/features/**": { lines: 90, branches: 85, perFile: true },
   // The default for `src/**`, added with the ledger adapters' directory.
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
   // The default for `src/**`, added with the block trace's directory.

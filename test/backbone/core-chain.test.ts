@@ -22,7 +22,7 @@ import {
 } from "../../src/backbone/core-chain/index.js";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
 import networksFile from "../../src/ledger/networks.json" with { type: "json" };
-import { builtInNetwork, KNOWN_NETWORKS, ledgerTableOf, parseNetworksFile } from "../../src/ledger/networks.js";
+import { builtInNetwork, isLocalNetwork, KNOWN_NETWORKS, LOCAL_NETWORKS, ledgerTableOf, parseNetworksFile } from "../../src/ledger/networks.js";
 import type { LedgerTable } from "../../src/ledger/version-table.js";
 import { resolveDeclarations } from "../../src/runner/resolve.js";
 import { checkHistory, graphInputOf } from "../../src/config/history.js";
@@ -70,7 +70,7 @@ const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex
 const OTHER_GENESIS: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0xee), parentHash: new Uint8Array(32) };
 
 /** The configured network whose genesis is `genesis`'s hash: a `custom` network. */
-const configuredAs = (genesis: BlockRef): ConfiguredGenesis => ({ network: "custom", hash: genesis.hash });
+const configuredAs = (genesis: BlockRef): ConfiguredGenesis => ({ network: "custom", hash: genesis.hash, local: false });
 
 /** The tests' configured network: `custom`, its genesis the in-memory chain's block 0. */
 const CONFIGURED = configuredAs(inMemoryBlock(0n));
@@ -354,6 +354,23 @@ describe("the startup checks and the wait for the node", () => {
     expect(waits).toEqual([]);
   });
 
+  it("takes a local network's genesis from the node on a new database, and holds every later start to the stored one", async () => {
+    const undeployed = configuredGenesisOf({ network: "undeployed" });
+    const source = new InMemoryBlockSource({ head: 9n });
+    // A new database: any node's block 0 is the local chain's.
+    expect(await checkChain({ source, identity: null, cursor: null, configured: undeployed, signal: signal() })).toEqual({
+      genesisHash: inMemoryBlock(0n).hash,
+    });
+    // A database of this chain: the same node passes.
+    const own = { source, identity: identityOf(inMemoryBlock(0n)), cursor: inMemoryBlock(7n), configured: undeployed };
+    expect(await checkChain({ ...own, signal: signal() })).toEqual({ genesisHash: inMemoryBlock(0n).hash });
+    // A database of another local chain (a node restarted from a new genesis): refused by the stored genesis.
+    const other = (await rejectionOf(checkChain({ ...own, identity: identityOf(OTHER_GENESIS), signal: signal() }))) as UmbraError;
+    expect(other).toBeInstanceOf(UmbraError);
+    expect(other.code).toBe("genesis-mismatch");
+    expect(other.details).toEqual({ stored: hex(OTHER_GENESIS.hash), node: hex(inMemoryBlock(0n).hash) });
+  });
+
   it("refuses a known network whose built-in table records no genesis hash, before asking the node", async () => {
     let asked = 0;
     const source = new InMemoryBlockSource({ head: 9n });
@@ -371,7 +388,7 @@ describe("the startup checks and the wait for the node", () => {
           source: counting,
           identity: cursor === null ? null : identityOf(inMemoryBlock(0n)),
           cursor,
-          configured: { network: "stagenet", hash: null },
+          configured: { network: "stagenet", hash: null, local: false },
           signal: signal(),
         }),
       )) as UmbraError;
@@ -404,18 +421,24 @@ describe("the configured network's genesis hash", () => {
   it("is the core entry's genesisHash for a custom network", () => {
     const given = `0x${"ab".repeat(32)}`;
     const configured = configuredGenesisOf({ network: "custom", genesisHash: given });
-    expect(configured).toEqual({ network: "custom", hash: bytes(given) });
+    expect(configured).toEqual({ network: "custom", hash: bytes(given), local: false });
     expect(Object.isFrozen(configured)).toBe(true);
   });
 
-  it("is the built-in table's for each known network, read through the table; every one has it in this build", () => {
-    for (const network of KNOWN_NETWORKS) {
+  it("is the built-in table's for each known network but the local ones, read through the table; every one has it in this build", () => {
+    for (const network of KNOWN_NETWORKS.filter((n) => !isLocalNetwork(n))) {
       const recorded = builtInNetwork(network)?.genesis?.hash;
-      // Every known network's genesis was recorded from its node (src/ledger/networks.json), so the refusal of a known
-      // network with no recorded genesis applies to none of them in this build.
+      // Every official network's genesis was recorded from its node (src/ledger/networks.json), so the refusal of a
+      // known network with no recorded genesis applies to none of them in this build.
       expect(recorded, network).toMatch(/^0x[0-9a-f]{64}$/);
-      expect(configuredGenesisOf({ network }), network).toEqual({ network, hash: bytes(recorded as string) });
+      expect(configuredGenesisOf({ network }), network).toEqual({ network, hash: bytes(recorded as string), local: false });
     }
+  });
+
+  it("is null and local for undeployed, the local network: the node's genesis is taken", () => {
+    expect(LOCAL_NETWORKS).toEqual(["undeployed"]);
+    expect(builtInNetwork("undeployed")?.genesis).toBeNull();
+    expect(configuredGenesisOf({ network: "undeployed" })).toEqual({ network: "undeployed", hash: null, local: true });
   });
 
   it("is null for a known network whose built-in table records no genesis hash, or that has no built-in entry", () => {
@@ -425,11 +448,11 @@ describe("the configured network's genesis hash", () => {
     for (const entry of file.networks) if (entry.network === "stagenet") entry.genesis = null;
     const networks = parseNetworksFile(file);
     const lookup = (network: string) => networks.find((entry) => entry.network === network) ?? null;
-    expect(configuredGenesisOf({ network: "stagenet" }, lookup)).toEqual({ network: "stagenet", hash: null });
+    expect(configuredGenesisOf({ network: "stagenet" }, lookup)).toEqual({ network: "stagenet", hash: null, local: false });
     expect(configuredGenesisOf({ network: "mainnet" }, lookup).hash).toEqual(bytes(builtInNetwork("mainnet")?.genesis?.hash as string));
-    expect(configuredGenesisOf({ network: "preview" }, () => null)).toEqual({ network: "preview", hash: null });
+    expect(configuredGenesisOf({ network: "preview" }, () => null)).toEqual({ network: "preview", hash: null, local: false });
     // A known network's genesis is the build's only: never a genesisHash (which the configuration refuses there).
-    expect(configuredGenesisOf({ network: "stagenet", genesisHash: `0x${"cd".repeat(32)}` }, lookup)).toEqual({ network: "stagenet", hash: null });
+    expect(configuredGenesisOf({ network: "stagenet", genesisHash: `0x${"cd".repeat(32)}` }, lookup)).toEqual({ network: "stagenet", hash: null, local: false });
     expect(configuredGenesisOf({ network: "mainnet", genesisHash: `0x${"cd".repeat(32)}` }).hash).toEqual(
       bytes(builtInNetwork("mainnet")?.genesis?.hash as string),
     );

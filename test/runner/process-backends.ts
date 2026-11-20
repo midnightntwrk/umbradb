@@ -115,8 +115,19 @@ function pgliteBackend(): ProcessBackend {
   };
 }
 
-/** PostgreSQL 18 and PGlite 0.5.10. */
-export const PROCESS_BACKENDS: readonly ProcessBackend[] = [postgresBackend(), pgliteBackend()];
+/**
+ * PostgreSQL 18 and PGlite 0.5.10; `UMBRADB_PROCESS_BACKENDS` (a comma-separated list of `postgres`, `pglite`) keeps
+ * only those, for a run that reruns the tests many times (a mutation run). A full run never sets it.
+ */
+export const PROCESS_BACKENDS: readonly ProcessBackend[] = ((): ProcessBackend[] => {
+  const all = [postgresBackend(), pgliteBackend()];
+  const only = process.env.UMBRADB_PROCESS_BACKENDS;
+  if (only === undefined || only === "") return all;
+  const kinds = only.split(",").map((kind) => kind.trim());
+  const kept = all.filter((backend) => kinds.includes(backend.kind));
+  if (kept.length === 0) throw new Error(`UMBRADB_PROCESS_BACKENDS names no backend: ${only}`);
+  return kept;
+})();
 
 /** The backend of `kind`, for a test file that runs on one backend so that the two can go to different CI shards. */
 export const processBackend = (kind: ProcessBackend["kind"]): ProcessBackend =>

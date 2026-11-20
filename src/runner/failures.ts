@@ -115,7 +115,6 @@ export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "root-mismatch",
   // A reclamation check of `core-ledger-state` that fails halts with its own code, not `callback-error`.
   "ledger-refcount-invalid",
-  "fast-log-unsupported",
   "lockstep-behind",
   "report-hash-mismatch",
   "public-config-changed",

@@ -17,7 +17,7 @@ import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-resu
 import { coreEntry, defineConfig } from "../../src/config/entries.js";
 import { type BrowserConfiguration, type BrowserRun, databaseOf } from "./configuration.js";
 
-const NETWORKS = ["mainnet", "preprod", "preview", "stagenet", "custom"] as const;
+const NETWORKS = ["mainnet", "preprod", "preview", "stagenet", "undeployed", "custom"] as const;
 
 function core(run: BrowserRun) {
   const network = (NETWORKS as readonly string[]).includes(run.params.network ?? "") ? run.params.network : "preview";

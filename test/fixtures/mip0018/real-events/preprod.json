@@ -1,0 +1,433 @@
+{
+ "about": "Contract logs of Midnight preprod at the heights where the contracts below emitted Misc events, as core-contract-logs-full stored them (table contract_logs.logs), and what the MIP-0018 reference tool concludes for each contract (mip0018 list, midnight-experiments/mip-0018@3252703). Captured 2026-11-19. Public chain data only.",
+ "network": "preprod",
+ "logs": [
+  {
+   "height": 3477265,
+   "tx": 0,
+   "index": 0,
+   "contract": "676c1526e017dc75024cec5461628750a13176013cb18db630aad232bea0c759",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800c9016e036d69702d303031383a746f6b656e2d6d657461646174615b76315d0000000000646f6d696e696f6e3a6d74733a4348495000000000000000000000000000000002046e616d65010d446f6d696e696f6e20434849500673796d626f6c01044348495008646563696d616c73020106200904000401"
+  },
+  {
+   "height": 3483789,
+   "tx": 0,
+   "index": 0,
+   "contract": "1c49e51ba8ae684bb5361c95fca32c0575b089c65014e9b397122f891f144333",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800c1016c036d69702d303031383a746f6b656e2d6d657461646174615b76315d00000000006d69702d303031383a6578616d706c653a756e736869656c646564000000000002046e616d65010b41636d65205075626c69630673796d626f6c01044150554208646563696d616c73020106200904000401"
+  },
+  {
+   "height": 3483805,
+   "tx": 0,
+   "index": 0,
+   "contract": "e1b498c72a8ef30d5c11d751a8cb0cd9120af54f0569b097138e2056ca2c0a7d",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800c1016c036d69702d303031383a746f6b656e2d6d657461646174615b76315d00000000006d69702d303031383a6578616d706c653a736869656c6465640000000000000001046e616d65010b41636d6520536869656c640673796d626f6c01044153484408646563696d616c73020106200904000401"
+  },
+  {
+   "height": 3483836,
+   "tx": 0,
+   "index": 0,
+   "contract": "c423fca48329307ba00383e8c40cf1b3a83a7728a2b6721e863cfa16d25fb3ec",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800990162035369676e4269646972656374696f6e616c4576656e74000000000000000000000147f7a4b2cb60730af7393831fe98d1c25b5178f9ecddc8a43316b548126ebe008daa2e786aaa9555e199613fa3b6712fb09397f080d377b60f2b66f591e5ca0501200904000401"
+  },
+  {
+   "height": 3483836,
+   "tx": 1,
+   "index": 1,
+   "contract": "3901cd2c6d021d03ca9678008cd3a15f2a15eb4b6b825c7e1c751a2078b07a5e",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800bd016b036d69702d303031383a746f6b656e2d6d657461646174615b76315d00000000006d69702d303031383a6578616d706c653a6d756c74692d6b696e64000000000001046e616d65010b41636d6520446f6c6c61720673796d626f6c010341434408646563696d616c73020102200904000401"
+  },
+  {
+   "height": 3483836,
+   "tx": 1,
+   "index": 2,
+   "contract": "3901cd2c6d021d03ca9678008cd3a15f2a15eb4b6b825c7e1c751a2078b07a5e",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800bd016b036d69702d303031383a746f6b656e2d6d657461646174615b76315d00000000006d69702d303031383a6578616d706c653a6d756c74692d6b696e64000000000002046e616d65010b41636d6520446f6c6c61720673796d626f6c010341434408646563696d616c73020102200904000401"
+  },
+  {
+   "height": 3483836,
+   "tx": 1,
+   "index": 3,
+   "contract": "3901cd2c6d021d03ca9678008cd3a15f2a15eb4b6b825c7e1c751a2078b07a5e",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800bd016b036d69702d303031383a746f6b656e2d6d657461646174615b76315d00000000006d69702d303031383a6578616d706c653a6d756c74692d6b696e64000000000003046e616d65010b41636d6520446f6c6c61720673796d626f6c010341434408646563696d616c73020102200904000401"
+  },
+  {
+   "height": 3483846,
+   "tx": 0,
+   "index": 0,
+   "contract": "c423fca48329307ba00383e8c40cf1b3a83a7728a2b6721e863cfa16d25fb3ec",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800990162035369676e4269646972656374696f6e616c4576656e74000000000000000000000169a50810dfbf18550197d5ba25477bf1d47ff8f6d7f4cb3006139a654978e700d4d937ddb82c4c18a7e8bec2b7bfbaf6720963301450a594d8bf34f5f1205f4501200904000401"
+  },
+  {
+   "height": 3483846,
+   "tx": 1,
+   "index": 1,
+   "contract": "3c9f339c6b5db5dc850ec92fe7d651c640033f94b1fd0dd2e6ff8a3af14a6a61",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a0800b9016a036d69702d303031383a746f6b656e2d6d657461646174615b76315d00000000006d69702d303031383a6578616d706c653a66756e6769626c650000000000000003046e616d65010941636d6520476f6c640673796d626f6c010441474c4408646563696d616c73020106200904000401"
+  },
+  {
+   "height": 3483858,
+   "tx": 0,
+   "index": 0,
+   "contract": "3c9f339c6b5db5dc850ec92fe7d651c640033f94b1fd0dd2e6ff8a3af14a6a61",
+   "type": "Misc",
+   "data": "6d69646e696768743a696d706163742d73746174652d76616c75655b76325d286661622d616c69676e65642d76616c75655b76315d293a080089017e026d69702d303031383a746f6b656e2d6d657461646174615b76315d00000000006d69702d303031383a6578616d706c653a66756e6769626c650000000000000003046e616d65010941636d6520436f696e0673796d626f6c010441434f49200904000401"
+  }
+ ],
+ "contracts": [
+  {
+   "label": "dominion-chip",
+   "address": "676c1526e017dc75024cec5461628750a13176013cb18db630aad232bea0c759",
+   "reference": {
+    "counts": {
+     "events": 1,
+     "accepted": 1,
+     "rejected": 0,
+     "ignored": 0
+    },
+    "identities": [
+     {
+      "domainSep": "646f6d696e696f6e3a6d74733a43484950000000000000000000000000000000",
+      "kind": 2,
+      "color": "4b0b96653724cb74281f3599a703026c3184da3c1b085d7fa63bd1d8a0807f2e",
+      "common": {
+       "name": "Dominion CHIP",
+       "symbol": "CHIP",
+       "decimals": "6"
+      },
+      "fields": [
+       {
+        "key": "6e616d65",
+        "valType": 1,
+        "value": "446f6d696e696f6e2043484950",
+        "usable": true,
+        "block": 3477265,
+        "record": 0
+       },
+       {
+        "key": "73796d626f6c",
+        "valType": 1,
+        "value": "43484950",
+        "usable": true,
+        "block": 3477265,
+        "record": 1
+       },
+       {
+        "key": "646563696d616c73",
+        "valType": 2,
+        "value": "06",
+        "usable": true,
+        "block": 3477265,
+        "record": 2
+       }
+      ]
+     }
+    ],
+    "groups": []
+   }
+  },
+  {
+   "label": "native-unshielded",
+   "address": "1c49e51ba8ae684bb5361c95fca32c0575b089c65014e9b397122f891f144333",
+   "reference": {
+    "counts": {
+     "events": 1,
+     "accepted": 1,
+     "rejected": 0,
+     "ignored": 0
+    },
+    "identities": [
+     {
+      "domainSep": "6d69702d303031383a6578616d706c653a756e736869656c6465640000000000",
+      "kind": 2,
+      "color": "cfd8dcfb10345d0469fc1d0d360dff3ea45443db005913bfdfc387427ed1d1bd",
+      "common": {
+       "name": "Acme Public",
+       "symbol": "APUB",
+       "decimals": "6"
+      },
+      "fields": [
+       {
+        "key": "6e616d65",
+        "valType": 1,
+        "value": "41636d65205075626c6963",
+        "usable": true,
+        "block": 3483789,
+        "record": 0
+       },
+       {
+        "key": "73796d626f6c",
+        "valType": 1,
+        "value": "41505542",
+        "usable": true,
+        "block": 3483789,
+        "record": 1
+       },
+       {
+        "key": "646563696d616c73",
+        "valType": 2,
+        "value": "06",
+        "usable": true,
+        "block": 3483789,
+        "record": 2
+       }
+      ]
+     }
+    ],
+    "groups": []
+   }
+  },
+  {
+   "label": "native-shielded",
+   "address": "e1b498c72a8ef30d5c11d751a8cb0cd9120af54f0569b097138e2056ca2c0a7d",
+   "reference": {
+    "counts": {
+     "events": 1,
+     "accepted": 1,
+     "rejected": 0,
+     "ignored": 0
+    },
+    "identities": [
+     {
+      "domainSep": "6d69702d303031383a6578616d706c653a736869656c64656400000000000000",
+      "kind": 1,
+      "color": "5ff328b2710b4b2677f2be5df8a232316a69ea4b2a79c4680bd4e32dff81e652",
+      "common": {
+       "name": "Acme Shield",
+       "symbol": "ASHD",
+       "decimals": "6"
+      },
+      "fields": [
+       {
+        "key": "6e616d65",
+        "valType": 1,
+        "value": "41636d6520536869656c64",
+        "usable": true,
+        "block": 3483805,
+        "record": 0
+       },
+       {
+        "key": "73796d626f6c",
+        "valType": 1,
+        "value": "41534844",
+        "usable": true,
+        "block": 3483805,
+        "record": 1
+       },
+       {
+        "key": "646563696d616c73",
+        "valType": 2,
+        "value": "06",
+        "usable": true,
+        "block": 3483805,
+        "record": 2
+       }
+      ]
+     }
+    ],
+    "groups": []
+   }
+  },
+  {
+   "label": "multi-kind",
+   "address": "3901cd2c6d021d03ca9678008cd3a15f2a15eb4b6b825c7e1c751a2078b07a5e",
+   "reference": {
+    "counts": {
+     "events": 3,
+     "accepted": 3,
+     "rejected": 0,
+     "ignored": 0
+    },
+    "identities": [
+     {
+      "domainSep": "6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000",
+      "kind": 1,
+      "color": "827c97ce95d2cb1bc4cdbaf4a5f7dd9be5c574acd8fda9d85883c8b32c0cb872",
+      "common": {
+       "name": "Acme Dollar",
+       "symbol": "ACD",
+       "decimals": "2"
+      },
+      "fields": [
+       {
+        "key": "6e616d65",
+        "valType": 1,
+        "value": "41636d6520446f6c6c6172",
+        "usable": true,
+        "block": 3483836,
+        "record": 0
+       },
+       {
+        "key": "73796d626f6c",
+        "valType": 1,
+        "value": "414344",
+        "usable": true,
+        "block": 3483836,
+        "record": 1
+       },
+       {
+        "key": "646563696d616c73",
+        "valType": 2,
+        "value": "02",
+        "usable": true,
+        "block": 3483836,
+        "record": 2
+       }
+      ]
+     },
+     {
+      "domainSep": "6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000",
+      "kind": 2,
+      "color": "827c97ce95d2cb1bc4cdbaf4a5f7dd9be5c574acd8fda9d85883c8b32c0cb872",
+      "common": {
+       "name": "Acme Dollar",
+       "symbol": "ACD",
+       "decimals": "2"
+      },
+      "fields": [
+       {
+        "key": "6e616d65",
+        "valType": 1,
+        "value": "41636d6520446f6c6c6172",
+        "usable": true,
+        "block": 3483836,
+        "record": 0
+       },
+       {
+        "key": "73796d626f6c",
+        "valType": 1,
+        "value": "414344",
+        "usable": true,
+        "block": 3483836,
+        "record": 1
+       },
+       {
+        "key": "646563696d616c73",
+        "valType": 2,
+        "value": "02",
+        "usable": true,
+        "block": 3483836,
+        "record": 2
+       }
+      ]
+     },
+     {
+      "domainSep": "6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000",
+      "kind": 3,
+      "color": null,
+      "common": {
+       "name": "Acme Dollar",
+       "symbol": "ACD",
+       "decimals": "2"
+      },
+      "fields": [
+       {
+        "key": "6e616d65",
+        "valType": 1,
+        "value": "41636d6520446f6c6c6172",
+        "usable": true,
+        "block": 3483836,
+        "record": 0
+       },
+       {
+        "key": "73796d626f6c",
+        "valType": 1,
+        "value": "414344",
+        "usable": true,
+        "block": 3483836,
+        "record": 1
+       },
+       {
+        "key": "646563696d616c73",
+        "valType": 2,
+        "value": "02",
+        "usable": true,
+        "block": 3483836,
+        "record": 2
+       }
+      ]
+     }
+    ],
+    "groups": [
+     {
+      "symbol": "414344",
+      "members": [
+       {
+        "domainSep": "6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000",
+        "kind": 1
+       },
+       {
+        "domainSep": "6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000",
+        "kind": 2
+       },
+       {
+        "domainSep": "6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000",
+        "kind": 3
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "label": "fungible-token",
+   "address": "3c9f339c6b5db5dc850ec92fe7d651c640033f94b1fd0dd2e6ff8a3af14a6a61",
+   "reference": {
+    "counts": {
+     "events": 2,
+     "accepted": 2,
+     "rejected": 0,
+     "ignored": 0
+    },
+    "identities": [
+     {
+      "domainSep": "6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000",
+      "kind": 3,
+      "color": null,
+      "common": {
+       "name": "Acme Coin",
+       "symbol": "ACOI",
+       "decimals": "6"
+      },
+      "fields": [
+       {
+        "key": "6e616d65",
+        "valType": 1,
+        "value": "41636d6520436f696e",
+        "usable": true,
+        "block": 3483858,
+        "record": 0
+       },
+       {
+        "key": "73796d626f6c",
+        "valType": 1,
+        "value": "41434f49",
+        "usable": true,
+        "block": 3483858,
+        "record": 1
+       },
+       {
+        "key": "646563696d616c73",
+        "valType": 2,
+        "value": "06",
+        "usable": true,
+        "block": 3483846,
+        "record": 2
+       }
+      ]
+     }
+    ],
+    "groups": []
+   }
+  }
+ ]
+}

@@ -1,0 +1,124 @@
+# `token-metadata-api`
+
+The JSON API of the `token-metadata-api` module over `token-metadata`'s tables: MIP-0018 token metadata, one route.
+
+- **Route:** `token-metadata-api.getTokens`, a route registered with the core (module guide §7), which serves it over
+  HTTP at `GET /token-metadata-api/v1/tokens`, under the module's own namespace, on the module API (`listen.api`, or
+  the page's worker in the browser build). Implementation: `src/features/token-metadata-api/`.
+- **Schemas:** the input and the output are zod schemas (`schemas.ts`), which the core keeps as JSON Schema. Every
+  input is checked against its schema before the handler runs, and every output is written with its schema before it
+  is sent.
+- **Bytes and integers:** bytes are `0x` and lowercase hex, in a request and in an answer. A height and a `UInt`
+  value are digits in a string, which no JSON reader rounds.
+- **One state per answer:** each answer is one read at the latest committed height, and carries the core's
+  `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`. Before block S commits, the route answers 503
+  `no-committed-height`.
+- **Untrusted:** names, symbols, URIs and every other value are what a contract published. Show text as text, never
+  as markup; never follow a URI without your own checks. The module fetches nothing.
+
+## Request
+
+A `GET` whose query parameters are exactly one of five selectors. Every 32-byte value is `0x` and 64 lowercase hex
+digits. A request has no body.
+
+| Selector | Parameters | Answers |
+|---|---|---|
+| Every token | no parameter, or `limit=<1–100>` and `cursor=<string>` alone | every described token, by (contract, domainSep, kind), 20 a page unless `limit` says |
+| Colors | `colors=<color>,<color>,…`: 1 to 100 colors in one parameter, separated by commas; given alone | the described kind 1 and 2 tokens of each color (one color covers a token's shielded and unshielded kinds) |
+| Contract | `contract=<address>`, and optionally `limit=<1–100>` and `cursor=<string>` | the contract's described tokens by (domainSep, kind), 20 a page unless `limit` says |
+| Contract and domain separator | `contract=<address>&domainSep=<hex>` | that token's described kinds |
+| One token | `contract=<address>&domainSep=<hex>&kind=<1, 2 or 3>` | that token, or none |
+
+```
+GET /token-metadata-api/v1/tokens
+GET /token-metadata-api/v1/tokens?contract=0x3c9f…6a61
+GET /token-metadata-api/v1/tokens?contract=0x3c9f…6a61&domainSep=0x6d69…0000&kind=3
+GET /token-metadata-api/v1/tokens?colors=0x5ff3…,0x827c…
+```
+
+Any other parameter, a missing one, a value outside its rule, or a mix of selectors (`colors` with `contract`, `domainSep` without
+`contract`, `kind` without `domainSep`, `limit` or `cursor` with `domainSep`) is 400 `invalid-request`. A `cursor` is the
+`nextCursor` of an earlier answer of the same list (every token, or the same contract); any other is 400. An answer
+with a `nextCursor` has more: send it as `cursor` for the next page. A hundred colors make a query of about 6.7 kB, which a
+proxy in front of the listener must let through.
+
+## Answer
+
+```json
+{ "items": [ Token, … ], "nextCursor": "<string>" | null }
+```
+
+`nextCursor` is set only for a contract's page with more tokens after it. A token that is not described (never, or
+withdrawn) is in no answer: an empty `items` is a valid answer.
+
+**Token**
+
+```json
+{
+  "contractAddress": "0xa1a1…", "domainSep": "0x0101…", "kind": 1, "kindName": "shielded-utxo",
+  "color": "0xbf1b…",
+  "common": { "name": "Acme Gold", "symbol": "AGLD", "decimals": "6", "standards": null,
+              "image": "https://example.com/agld.png", "imageSha256": "0xab12…" },
+  "fields": [ Field, … ],
+  "group": { "symbol": { "hex": "0x41474c44", "utf8": "AGLD" }, "memberCount": 2, "members": [ { "domainSep": "0x0101…", "kind": 1 }, … ] }
+}
+```
+
+- `kindName`: `shielded-utxo` (1), `unshielded-utxo` (2), `contract-token` (3).
+- `color`: `tokenType(domainSep, contractAddress)` for kinds 1 and 2; `null` for kind 3.
+- `common`: MIP-0018's six common fields, usable values only; one never set or unusable is `null`, with no default.
+  `image` is the URI the contract published and `imageSha256` the hash it published for the file there. The module
+  fetches nothing and checks nothing: a client that shows the image fetches it and compares its SHA-256 itself.
+- `fields`: every field the token has, in key byte order: at most the six keys MIP-0018 defines.
+- `group`: the tokens of the same contract whose served `symbol` is the same, when there are two or more (up to 100
+  members listed, `memberCount` counts them all); else `null`.
+
+**Field**
+
+```json
+{ "key": { "hex": "0x6e616d65", "utf8": "name" }, "valType": 1, "valTypeName": "utf8",
+  "value": { "hex": "0x41636d6520476f6c64", "text": "Acme Gold" }, "usable": true,
+  "updatedAt": { "height": "101", "txIndex": 0, "eventIndex": 0, "record": 0 } }
+```
+
+`value.text` is given for the text types (1, 3, 4) when the bytes are valid UTF-8, `value.integer` (a decimal string)
+for type 2. `usable` answers the common-field rule for a common key, else `null`. `updatedAt` is where the value was
+set: `height` is a decimal string, and `eventIndex` is the event's position among its transaction's log sites.
+
+## Rules
+
+| Rule | Meaning |
+|---|---|
+| Defined keys only | A key is served only when MIP-0018 defines it: `name`, `symbol`, `decimals`, `standards`, `image`, `image_sha256`. Other keys are not stored, so they are never served and never make a token exist. |
+| Withdrawal | A token exists only while one of its defined fields has a value; after its last is deleted it is in no answer, exactly as if it had never been described. |
+| Lengths | `name` and `symbol` are served as their first 64 and 12 characters (grapheme clusters, UAX #29); they are stored whole. |
+| No verdict | An answer gives a token's fields and says nothing about them: a client decides what a missing or unusable field means. A rejected event of the token's contract changes nothing in the answer. |
+| Hostile text | The answer's body is pure ASCII: every non-ASCII character and `<`, `>`, `&` are `\uXXXX` escapes; parsing gives the exact text back. |
+| Bounded cost | Each answer reads through the indexer's indexes in three statements, whatever the page's size: its tokens, their fields, and one count of all the page's symbols. A symbol that two or more tokens share takes one more read, for its members. One accepted exception: the group of a served 12-character symbol reads every symbol of its contract starting with it (`apiReadTimeoutMs` bounds the request). |
+
+## Errors
+
+Every error is `{ "error": { "code": <string>, "message": <string> } }`, the module API's envelope; a message never
+echoes the input. The core serves the route (module guide §7), so its codes are the module API's.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `invalid-request` | the parameters are no selector (the message names the input's path and rule), or a cursor this route did not give for that contract |
+| 404 | `not-found` | a path the module has no route for (the module API's answer) |
+| 405 | `method-not-allowed` | a method other than `GET` (`Allow: GET`) |
+| 503 | `no-committed-height` | before block S commits |
+| 504 | `query-timeout` | a read past `apiReadTimeoutMs` |
+| 500 | `internal-error` | anything else, with a fixed message |
+
+Every answer carries `Content-Type: application/json; charset=utf-8`, `Cache-Control: no-store`,
+`X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` and
+`Referrer-Policy: no-referrer`.
+
+## Not served yet
+
+| What | Now | Later | Comes with |
+|---|---|---|---|
+| A color of a minted but undescribed token | not in `colors` answers | answered through the color table filled from native mints | the color table |
+| Mints and activity (`minted`, first seen, evidence) | not served | served | the activity change |
+
+MIP-0018 is pinned at commit `eb94bc182221cd937a84ed66a5f903b060f165ab`.

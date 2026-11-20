@@ -168,7 +168,7 @@ The `core` entry's settings, the main ones (`GET /config` shows them all, with t
 
 | Setting | Default | |
 |---|---|---|
-| `network` | | `mainnet`, `preprod`, `preview`, `stagenet`, or `custom` with `genesisHash` |
+| `network` | | `mainnet`, `preprod`, `preview`, `stagenet`, `undeployed` (a local standalone node), or `custom` with `genesisHash` |
 | `node` | | The node's WebSocket URL (secret) |
 | `database` | | The database as parts, PostgreSQL or PGlite (below); only `password` is secret |
 | `developmentOptIn` | `false` | Required for PGlite and for development-only modules |
