@@ -2,6 +2,7 @@ import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-blo
 import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
 import { CORE_LEDGER_STATE } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
+import { mnsvSpecVersion } from "../../src/ledger/version-table.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
@@ -16,11 +17,14 @@ import type { FoundTape } from "../tape/real/real-tapes.js";
  *
  * A process that syncs from a tape's first block asks what the recording asked. One restarted at cursor c also asks:
  * - the header of c, for startup's cursor-hash check;
- * - the runtime metadata at c's hash, the parent of the first block it decodes. A tape holds it once per runtime
- *   only.
+ * - the runtime version and the runtime metadata at c's hash, the parent of the first block it decodes (a new
+ *   process's metadata cache confirms its first block's runtime: `src/ledger/metadata.ts`). A recorded tape holds the
+ *   version at every block and the metadata once per runtime; a synthetic one holds both once per runtime only.
  *
- * {@link restartAt} adds both, for the recorded tapes as for the synthetic ones. The metadata record is copied from the
- * one of the runtime that c's state has, since a runtime's metadata is the same bytes at every one of its blocks.
+ * {@link restartAt} adds them, for the recorded tapes as for the synthetic ones. The metadata record is copied from the
+ * one of the runtime that c's state has, since a runtime's metadata is the same bytes at every one of its blocks. That
+ * runtime is the tape's `state_getRuntimeVersion` answer at c when it has one, else the `spec_version` of c's own `MNSV`
+ * digest (a synthetic tape, whose blocks are not upgrade blocks).
  */
 
 /** The ledger's core modules as the build enables them (`core-ledger-state` and what it requires). */
@@ -74,20 +78,47 @@ export function cappedAt(records: readonly TapeRecord[], height: bigint): TapeRe
   return [...capped, { method: "chain_getHeader", params: [hash], result: headerOf(records, hash) as never }];
 }
 
+/** The `spec_version` of the `MNSV` digest of the block `hash` on the tape. */
+function mnsvAt(records: readonly TapeRecord[], hash: string): number {
+  const header = headerOf(records, hash) as { readonly number: string; readonly digest: { readonly logs: readonly string[] } };
+  const bytes = (text: string): Uint8Array => Uint8Array.from(Buffer.from(text.slice(2), "hex"));
+  return mnsvSpecVersion({ height: BigInt(header.number), hash: bytes(hash), digest: header.digest.logs.map(bytes) });
+}
+
+/**
+ * The runtime the state at `hash` has (see the module comment): `state_getRuntimeVersion`'s answer there, or the
+ * block's own `MNSV` version; and the tape's runtime version record to copy for it, as `state_getRuntimeVersion`
+ * answers.
+ */
+function runtimeAt(records: readonly TapeRecord[], hash: string): { readonly specVersion: number; readonly record: Call | undefined } {
+  const calls = records.filter(isCall);
+  const recorded = calls.find((r) => r.method === "state_getRuntimeVersion" && firstParam(r) === hash);
+  if (recorded !== undefined) return { specVersion: (recorded.result as { readonly specVersion: number }).specVersion, record: recorded };
+  const specVersion = mnsvAt(records, hash);
+  const like = calls.find((r) => r.method === "state_getRuntimeVersion" && (r.result as { readonly specVersion?: number }).specVersion === specVersion);
+  return { specVersion, record: like };
+}
+
 /**
  * The `state_getMetadata` record for `hash`, copied from the tape's record of the runtime the state at `hash` has
- * (see the module comment): the runtime is `state_getRuntimeVersion`'s at `hash`.
+ * (see the module comment).
  */
 export function metadataRecordAt(records: readonly TapeRecord[], hash: string): TapeRecord {
   const calls = records.filter(isCall);
+  const wanted = runtimeAt(records, hash).specVersion;
   const versionAt = (at: unknown): number | undefined =>
     (calls.find((r) => r.method === "state_getRuntimeVersion" && firstParam(r) === at)?.result as { readonly specVersion?: number } | undefined)
       ?.specVersion;
-  const wanted = versionAt(hash);
-  if (wanted === undefined) throw new Error(`the tape holds no runtime version at ${hash}`);
   const source = calls.find((r) => r.method === "state_getMetadata" && versionAt(firstParam(r)) === wanted);
   if (source === undefined) throw new Error(`the tape holds no metadata of runtime ${wanted}`);
   return { method: "state_getMetadata", params: [hash], result: source.result as never };
+}
+
+/** The `state_getRuntimeVersion` record for `hash` (see the module comment), copied from one of the same runtime. */
+function runtimeRecordAt(records: readonly TapeRecord[], hash: string): TapeRecord {
+  const { specVersion, record } = runtimeAt(records, hash);
+  if (record === undefined) throw new Error(`the tape holds no runtime version answer of runtime ${specVersion}`);
+  return { method: "state_getRuntimeVersion", params: [hash], result: record.result as never };
 }
 
 /** `records` for a process restarted at cursor `cursor` (see the module comment): its header and metadata added. */
@@ -97,6 +128,7 @@ export function restartAt(records: readonly TapeRecord[], cursor: bigint): TapeR
   return [
     ...records,
     ...(has("chain_getHeader") ? [] : [{ method: "chain_getHeader", params: [hash], result: headerOf(records, hash) as never }]),
+    ...(has("state_getRuntimeVersion") ? [] : [runtimeRecordAt(records, hash)]),
     ...(has("state_getMetadata") ? [] : [metadataRecordAt(records, hash)]),
   ];
 }

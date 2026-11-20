@@ -24,9 +24,19 @@ import type { PlainData, PlainObject } from "../config/plain-data.js";
 import { type ProcessSide, PUBLIC_CORE_SCHEMA } from "../config/core-settings.js";
 import type { Redactor } from "../config/redact.js";
 import type { NodeConnection } from "../node/client.js";
+import type { NodeCallCounts } from "../node/counts.js";
 import type { ProcessStatus } from "../runner/process.js";
 import { sanitizedError } from "./errors.js";
-import type { AdminSnapshot, ConfigSnapshot, ModuleStatus, NodeStatus, PrivateInstanceStatus, StatusSnapshot } from "./types.js";
+import type {
+  AdminSnapshot,
+  ConfigSnapshot,
+  LedgerStatus,
+  ModuleStatus,
+  NodeBatches,
+  NodeStatus,
+  PrivateInstanceStatus,
+  StatusSnapshot,
+} from "./types.js";
 
 /**
  * The default liveness timeout (30 s), read from the `core` schema: the snapshot's before the configuration's.
@@ -108,6 +118,12 @@ export interface NodeFacts {
   readonly bestHead: bigint | null;
   readonly connection: NodeConnection | null;
   readonly queueDepth: number | null;
+  /** The node client's counts per method (`src/node/counts.ts`). */
+  readonly calls: NodeCallCounts | null;
+  /** The last height whose ledger root matched the node's (`SourceNodeView.lastRootMatch`); null before any. */
+  readonly lastRootMatch?: bigint | null;
+  /** The node client's frames sent and whether the current connection refused batches; null (or absent) before it. */
+  readonly batches?: NodeBatches | null;
 }
 
 /** What a snapshot holds besides `status()`. */
@@ -138,7 +154,7 @@ export interface SnapshotFacts {
   readonly privateInstances?: readonly PrivateInstanceFacts[];
   /** On a private process, whether it runs in lockstep, null while unknown; null unless given. */
   readonly publicLockstep?: boolean | null;
-  /** On the core, its node besides `status()`; the three null unless given. A private process has none. */
+  /** On the core, its node besides `status()`; the four null unless given. A private process has none. */
   readonly node?: NodeFacts;
 }
 
@@ -156,7 +172,13 @@ function instancesOf(instances: readonly PrivateInstanceFacts[]): readonly Priva
   );
 }
 
-/** The node as the core sees it (see {@link NodeStatus}): `status()`'s, and `node`'s three facts. */
+/** The ledger as the core sees it: its last matched root check, or null before any (and without `core-ledger-state`). */
+function ledgerOf(node: NodeFacts | undefined): LedgerStatus | null {
+  const last = node?.lastRootMatch ?? null;
+  return last === null ? null : Object.freeze({ lastRootMatch: last.toString() });
+}
+
+/** The node as the core sees it (see {@link NodeStatus}): `status()`'s, and `node`'s four facts. */
 function nodeOf(status: ProcessStatus, tipCap: number, node: NodeFacts | undefined): NodeStatus {
   const retrying = status.conditions.find((condition) => condition.code === "node-retrying") as
     | { readonly attempts: number }
@@ -169,6 +191,8 @@ function nodeOf(status: ProcessStatus, tipCap: number, node: NodeFacts | undefin
     queueDepth: node?.queueDepth ?? null,
     tipCap,
     finalityStall: status.conditions.some((condition) => (condition.code as string) === "finality-stall"),
+    calls: node?.calls ?? null,
+    batches: node?.batches ?? null,
   });
 }
 
@@ -218,7 +242,7 @@ export function snapshotOf(status: ProcessStatus, facts: SnapshotFacts): AdminSn
     lastCommitAt: facts.lastCommitMs === null ? null : utcText(facts.lastCommitMs),
     node: core ? nodeOf(status, facts.tipCap, facts.node) : null,
     modules: facts.modules === null ? null : Object.freeze(modulesOf(facts.modules, facts.digests, status.cursor)),
-    ledger: null,
+    ledger: core ? ledgerOf(facts.node) : null,
     // The core's instances once startup opened the database (its parts known); a private process has none.
     privateInstances: !core || facts.modules === null ? null : instancesOf(facts.privateInstances ?? []),
     public: facts.side !== "private" ? null : Object.freeze({ cursor: height(status.head), lockstep: facts.publicLockstep ?? null }),

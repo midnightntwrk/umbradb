@@ -1,11 +1,12 @@
 import type { TapeClock, TapeRecord } from "../../tools/tape/index.js";
 import { E, type EventSpec, ledgerTransactions } from "../backbone/chain-data-tapes.js";
-import { eventsValue, finalizedWithEvents, RUNTIME_2_0 } from "../backbone/events-fixtures.js";
+import { eventsRead, eventsValue, finalizedWithEvents, RUNTIME_2_0 } from "../backbone/events-fixtures.js";
 import {
   blockRef,
   type ChainBlock,
   chainBlock,
   chainOf,
+  content,
   finalizedHead,
   headRead,
   ledgerTransaction,
@@ -32,6 +33,13 @@ import {
  * - {@link restoreSession}: a restore's checks against the node: block 0, the finalized head (the source's
  *   subscriptions first), the block at the backup's height when the head is not below it;
  *   {@link otherGenesisSession}: a node whose block 0 is another chain's.
+ *
+ * **Known hashes.** While the process follows the head, the node source takes a height's finalized hash from the head
+ * it read or was notified of, and the parent hash in that header (`src/backbone/core-block-fetch/node-source.ts`,
+ * FR-011): such a height's calls are its content and events only ({@link knownHeight}); a height below them that no
+ * header names (a jump in the notifications) is still asked by height ({@link height}). The tape node sends a
+ * notification only once every record before it was answered, so a hash record the source does not ask would stall
+ * the session.
  *
  * A session the page keeps open while a later one waits for the next connection (a reload's) ends with {@link
  * KEPT_OPEN}: a call record nothing asks, then the `disconnect` that separates the sessions — which, coming after a
@@ -105,6 +113,13 @@ function height(chain: BrowserChain, h: bigint, metadata: boolean): TapeRecord[]
   return finalizedWithEvents(at(chain, h), RUNTIME_2_0, value, metadata);
 }
 
+/** A height whose hash the source knows (see the module comment): its block, the runtime at its parent, its events. */
+function knownHeight(chain: BrowserChain, h: bigint, metadata: boolean): TapeRecord[] {
+  const value = eventsValue((chain.events.get(h) ?? []).map((event) => event.record));
+  const block = at(chain, h);
+  return [...content(block, RUNTIME_2_0, metadata), eventsRead(block, value)];
+}
+
 /** A page's question for the node's finalized head, `head` (see the module comment). */
 export function headSession(chain: BrowserChain, head: bigint): TapeRecord[] {
   return [...headRead(at(chain, head)), { disconnect: true }];
@@ -112,8 +127,9 @@ export function headSession(chain: BrowserChain, head: bigint): TapeRecord[] {
 
 /** The process on a new database from S = `start` to `to` (see the module comment). */
 export function syncSession(chain: BrowserChain, start: bigint, to: bigint): TapeRecord[] {
-  const records: TapeRecord[] = [...opening(at(chain, 0n), at(chain, start)), ...height(chain, start, true)];
-  for (let h = start + 1n; h <= to; h++) records.push(finalizedHead(at(chain, h)), ...height(chain, h, false));
+  // S is the head read, each later height a notified head: every hash is known.
+  const records: TapeRecord[] = [...opening(at(chain, 0n), at(chain, start)), ...knownHeight(chain, start, true)];
+  for (let h = start + 1n; h <= to; h++) records.push(finalizedHead(at(chain, h)), ...knownHeight(chain, h, false));
   return records;
 }
 
@@ -121,14 +137,17 @@ export function syncSession(chain: BrowserChain, start: bigint, to: bigint): Tap
  * The process on a new database from S = `start`, the head raised in two notifications: `batch` once S was fetched,
  * then `to` once the heights below `batch` were (see the module comment). The loop reads `batch` and processes up to
  * it; the node source holds `to` meanwhile, and the loop reads it after `batch`. With {@link heldBefore} at `batch`, the
- * process waits at `batch` − 1 with the two heads apart.
+ * process waits at `batch` − 1 with the two heads apart. The hashes of S, `batch`, `to` and the heights just below the
+ * two notified ones are known (see the module comment); the heights between are asked by height.
  */
 export function raisedHeadSession(chain: BrowserChain, start: bigint, batch: bigint, to: bigint): TapeRecord[] {
-  const records: TapeRecord[] = [...opening(at(chain, 0n), at(chain, start)), ...height(chain, start, true)];
+  const known = new Set([start, batch - 1n, batch, to - 1n, to]);
+  const of = (h: bigint): TapeRecord[] => (known.has(h) ? knownHeight(chain, h, false) : height(chain, h, false));
+  const records: TapeRecord[] = [...opening(at(chain, 0n), at(chain, start)), ...knownHeight(chain, start, true)];
   records.push(finalizedHead(at(chain, batch)));
-  for (let h = start + 1n; h < batch; h++) records.push(...height(chain, h, false));
+  for (let h = start + 1n; h < batch; h++) records.push(...of(h));
   records.push(finalizedHead(at(chain, to)));
-  for (let h = batch; h <= to; h++) records.push(...height(chain, h, false));
+  for (let h = batch; h <= to; h++) records.push(...of(h));
   return records;
 }
 
@@ -143,8 +162,9 @@ export function resumeSession(chain: BrowserChain, cursor: bigint): TapeRecord[]
 /** The process again on a database whose cursor is `cursor`, then each height to `to` (see the module comment). */
 export function continueSession(chain: BrowserChain, cursor: bigint, to: bigint): TapeRecord[] {
   const records = resumeSession(chain, cursor);
-  // A new run of the process asks the runtime's metadata again, at the first height it fetches.
-  for (let h = cursor + 1n; h <= to; h++) records.push(finalizedHead(at(chain, h)), ...height(chain, h, h === cursor + 1n));
+  // A new run of the process asks the runtime's metadata again, at the first height it fetches; each height is a
+  // notified head, its hash known.
+  for (let h = cursor + 1n; h <= to; h++) records.push(finalizedHead(at(chain, h)), ...knownHeight(chain, h, h === cursor + 1n));
   return records;
 }
 
@@ -167,12 +187,19 @@ export function otherGenesisSession(): TapeRecord[] {
 /** The longest delay a tape record takes: the hold's, which only {@link heldClock}'s release ends. */
 const HOLD_MS = 2_147_483_647;
 
-/** `records` with the first call of height `height` (its `chain_getBlockHash`) held (see the module comment). */
-export function heldBefore(records: readonly TapeRecord[], height: bigint): TapeRecord[] {
+/**
+ * `records` with the first call of height `height` held (see the module comment): its `chain_getBlockHash`, or its
+ * `chain_getBlock` where the hash is known and not asked.
+ */
+export function heldBefore(chain: BrowserChain, records: readonly TapeRecord[], height: bigint): TapeRecord[] {
+  const hash = at(chain, height).hex;
   let held = false;
   return records.map((record) => {
     const call = record as { readonly method?: string; readonly params?: readonly unknown[] };
-    if (held || call.method !== "chain_getBlockHash" || call.params?.[0] !== Number(height)) return record;
+    const first =
+      (call.method === "chain_getBlockHash" && call.params?.[0] === Number(height)) ||
+      (call.method === "chain_getBlock" && call.params?.[0] === hash);
+    if (held || !first) return record;
     held = true;
     return { ...record, delayMs: HOLD_MS } as TapeRecord;
   });

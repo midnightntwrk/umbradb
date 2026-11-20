@@ -8,7 +8,9 @@
  * `{"jsonrpc":"2.0","method":<name>,"params":{"subscription":<id>,"result":<value>}}`, each value in the tape's JSON
  * form (`./json.ts`) — the fields in the order a Substrate node (`jsonrpsee`) writes them. A notification carries
  * Substrate's name for its subscription: `chain_newHead` for `chain_subscribeNewHeads`, `chain_finalizedHead` for
- * `chain_subscribeFinalizedHeads`. The tape format records no name; another subscription method is its own name.
+ * `chain_subscribeFinalizedHeads`. The tape format records no name; another subscription method is its own name. A
+ * batch's answers are those answer frames as one JSON array ({@link batchFrame}), its requests read one by one
+ * ({@link readBatch}).
  */
 
 import { type Json, jsonText, parseJsonText } from "./json.js";
@@ -45,6 +47,26 @@ export function readRequest(text: string): ReadRequest {
   } catch {
     return { valid: false, id: null, error: PARSE_ERROR };
   }
+  return requestOf(message);
+}
+
+/**
+ * The requests of a JSON-RPC 2.0 batch frame (a non-empty array), in order, each read as {@link readRequest} reads a
+ * frame; null for a frame that is not one (not JSON, not an array, or an empty array, which JSON-RPC refuses as one
+ * invalid request).
+ */
+export function readBatch(text: string): readonly ReadRequest[] | null {
+  let message: unknown;
+  try {
+    message = parseJsonText(text);
+  } catch {
+    return null;
+  }
+  return Array.isArray(message) && message.length > 0 ? message.map(requestOf) : null;
+}
+
+/** A value read from JSON as a request (see {@link readRequest}). */
+function requestOf(message: unknown): ReadRequest {
   // A batch (an array) is no request: it has no `jsonrpc` field, so it is refused below.
   if (!isStructured(message)) return { valid: false, id: null, error: INVALID_REQUEST };
   const id = isId(message.id) ? message.id : null;
@@ -63,6 +85,11 @@ export function resultFrame(id: RequestId, result: Json): string {
 /** The answer frame carrying the JSON-RPC `error` for the request `id` (null: a frame that was no request). */
 export function errorFrame(id: RequestId | null, error: Json): string {
   return `{"jsonrpc":"2.0","id":${jsonText(id)},"error":${jsonText(error)}}`;
+}
+
+/** The answer frame of a batch: its requests' answer frames (each {@link resultFrame} or {@link errorFrame}) as one array. */
+export function batchFrame(answers: readonly string[]): string {
+  return `[${answers.join(",")}]`;
 }
 
 /** The notification frame of the subscription `subscription`, under the notification method `method`. */

@@ -121,8 +121,16 @@
       ]
     },
     "ledger": {
-      "type": "null",
-      "description": "The ledger version, package and last root check: null until the ledger tasks (12.x) report them."
+      "description": "The ledger's last root check: the last height whose ledger state root core-ledger-state compared with the node's and found matching in this process (ledgerRootInterval); null before any, without core-ledger-state, and on a private process.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["lastRootMatch"],
+          "additionalProperties": false,
+          "properties": { "lastRootMatch": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" } }
+        }
+      ]
     },
     "privateInstances": {
       "description": "On the core, its private instances (PP-9, AE-5; task 14.4): each listed or connected one with its id, connection, lockstep flag and synced height only; null on a private process, and on the core until startup opened its database.",
@@ -581,7 +589,9 @@
         "retries",
         "queueDepth",
         "tipCap",
-        "finalityStall"
+        "finalityStall",
+        "calls",
+        "batches"
       ],
       "properties": {
         "finalizedHead": {
@@ -625,6 +635,102 @@
         },
         "finalityStall": {
           "type": "boolean"
+        },
+        "calls": {
+          "description": "The node client's counts since the process made it (FR-015 of the node call budget), per allowed node method it used: calls made, tries sent (retries included), request frames sent, and calls that ended without an answer by code; null only before the process made its node client.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "chain_subscribeNewHeads",
+                  "chain_subscribeFinalizedHeads",
+                  "chain_getFinalizedHead",
+                  "chain_getBlockHash",
+                  "chain_getBlock",
+                  "chain_getHeader",
+                  "state_getStorage",
+                  "state_getKeysPaged",
+                  "state_getMetadata",
+                  "state_getRuntimeVersion",
+                  "midnight_ledgerStateRoot",
+                  "system_properties"
+                ]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/nodeMethodCounts"
+              }
+            }
+          ]
+        },
+        "batches": {
+          "description": "The node client's request frames and batches (FR-019 of the node call budget): frames sent since the process made it, a JSON-RPC batch frame once whatever it carried; and whether the node refused a batch on the current connection, whose calls then go one per frame until the next; null only before the process made its node client.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "frames",
+                "refused"
+              ],
+              "properties": {
+                "frames": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "refused": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "nodeMethodCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calls",
+        "attempts",
+        "frames",
+        "failures"
+      ],
+      "properties": {
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failures": {
+          "type": "object",
+          "propertyNames": {
+            "enum": [
+              "node-unreachable",
+              "node-error",
+              "node-requirement",
+              "handle-closed",
+              "aborted",
+              "other"
+            ]
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       }
     },

@@ -1,7 +1,8 @@
 /**
  * The core module `core-ledger-state`: the ledger state after every block. It is applied in the ledger worker
- * (`src/ledger/worker/`) from genesis, its root is checked against the node's at every height, and what applying it
- * produced is stored and published.
+ * (`src/ledger/worker/`) from genesis, its root is checked against the node's at the heights `./root-checks.ts`
+ * selects (block 0, every multiple of the `core` entry's `ledgerRootInterval`, each run's first height, each ledger or
+ * runtime change), and what applying it produced is stored and published.
  *
  * It is off by default and cannot start mid-chain: it needs the state of the block before, from genesis or from a
  * backup. So the requirement graph rejects it above height 0 with `cannot-start-mid-chain`.
@@ -15,17 +16,21 @@
  * - whether the block's first regular transaction may also be checked at the parent's time, which the replay rules
  *   decide from the runtime of the block's `MNSV` digest (`block-header`, `../../ledger/replay.ts`).
  *
- * Meanwhile it asks the node, through the block source bound with the worker, for its root after h
- * (`midnight_ledgerStateRoot`). Stored nodes the worker needs are read through the callback's read (the node-store
- * bridge).
+ * Meanwhile, at a checked height, it asks the node, through the block source bound with the worker, for its root after
+ * h (`midnight_ledgerStateRoot`); at any other height it neither asks nor waits. It tells the source which heights the
+ * height alone selects (`rootsChecked`), so the source's roots' prefetch asks for those only. Stored nodes the worker
+ * needs are read through the callback's read (the node-store bridge).
  *
  * **Block 0.** The genesis state is the node's `system_properties.genesis_state`. If its root is the node's root at
  * block 0, block 0's transactions run on an empty state for their results only, and the genesis state is the state
  * after block 0. Otherwise they are applied to the genesis state.
  *
- * **The root check.** The state's root after h must be the node's, or the callback throws `root-mismatch`
- * (`UmbraError`, with the height, the block's hash and both roots as `0x` hex in its details). That halts at h before
- * the block's transaction begins, so nothing of h is stored.
+ * **The root check.** At a checked height the state's root after h must be the node's, or the callback throws
+ * `root-mismatch` (`UmbraError`, with the height, the block's hash, both roots as `0x` hex and `lastMatchedHeight`, the
+ * last height whose root matched in this process or null before any, in its details). That halts at h before the
+ * block's transaction begins, so nothing of h is stored; the heights after `lastMatchedHeight` were not compared and
+ * are stored, so recovery is a backup restore at or below it. A passing check is reported to the source
+ * (`rootMatched`), for `/status`. The state's own root is computed and stored at every height either way.
  *
  * Then it puts the `block` items:
  * - `ledger-state` ({@link LedgerStateItem}): the state's key, root, summary and parameters, as plain data;
@@ -159,6 +164,7 @@
 
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
+import { latestBuildCoreEntry } from "../../config/process.js";
 import type { CheckedConfig } from "../../config/validate.js";
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
@@ -181,6 +187,7 @@ import { blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
 import { chainEventsItemOf } from "../core-chain-events/core-chain-events.js";
 import { txResultsItemOf } from "../core-tx-results/core-tx-results.js";
 import { LEDGER_NODE_TABLES } from "./node-set.js";
+import { ledgerRootIntervalOf, RootChecks, rootChecked, rootCheckedByHeight } from "./root-checks.js";
 import { type CoreRevision, coreRevisionsOf, releasedBy, retainedFrom, retentionWindow, revisionAt } from "./retention.js";
 import {
   addRootCounts,
@@ -398,6 +405,19 @@ export function countsCopyOf(p: ProcessContext): CountsCopy | null {
     COPIES.set(p, copy);
   }
   return copy;
+}
+
+/** What each process context remembers of its root checks (`./root-checks.ts`). */
+const ROOT_CHECKS = new WeakMap<ProcessContext, RootChecks>();
+
+/** `p`'s root checks, made at their first use. */
+function rootChecksOf(p: ProcessContext): RootChecks {
+  let checks = ROOT_CHECKS.get(p);
+  if (checks === undefined) {
+    checks = new RootChecks();
+    ROOT_CHECKS.set(p, checks);
+  }
+  return checks;
 }
 
 /** The `core` revisions of each process context, read once from its `config` item. */
@@ -698,13 +718,21 @@ export async function applyBlock(
     throw new Error(`block ${b.height}: ${outcomes.length} chain outcomes for ${transactions.length} transactions`);
   }
   const block = { height: b.height, hash: b.hash };
-  const nodeRoot = source.ledgerStateRoot({ height: b.height, hash: b.hash, parentHash: b.parentHash });
-  nodeRoot.catch(() => undefined);
+  // The root check's heights (`./root-checks.ts`): asked of the node only where the block is checked.
+  const checks = rootChecksOf(p);
+  const interval = ledgerRootIntervalOf(latestBuildCoreEntry(configOf(p))?.settings as Readonly<Record<string, unknown>> | undefined);
+  const appliedBlock = { height: b.height, specVersion: header.specVersion, ledger };
+  source.rootsChecked?.((height) => rootCheckedByHeight(height, interval));
+  const nodeRoot = rootChecked(b.height, checks.contextOf(appliedBlock, interval, b.continues))
+    ? source.ledgerStateRoot({ height: b.height, hash: b.hash, parentHash: b.parentHash })
+    : null;
+  nodeRoot?.catch(() => undefined);
   let applied: AppliedState;
   if (b.height === 0n) {
     const genesisState = await source.genesisState();
     const genesisRoot = await host.genesisRoot(ledger, genesisState);
-    const includesBlockZero = (options.includesBlockZero ?? sameBytes)(genesisRoot, await nodeRoot);
+    // Block 0 is always checked (`rootChecked`).
+    const includesBlockZero = (options.includesBlockZero ?? sameBytes)(genesisRoot, await (nodeRoot as Promise<Uint8Array>));
     applied = await host.genesis(
       {
         ledger,
@@ -756,18 +784,30 @@ export async function applyBlock(
       read,
     );
   }
-  // Traced apart: the wait for the node's root once the worker has answered is the node's time, not the apply's.
-  const rootFrom = performance.now();
-  const node = await nodeRoot;
-  traceAdd("rootWaitMs", performance.now() - rootFrom);
-  if (!(options.rootMatches ?? sameBytes)(applied.stateRoot, node)) {
-    throw new UmbraError(
-      "root-mismatch",
-      `the ledger state root after block ${b.height} (${hex(b.hash)}) is ${hex(applied.stateRoot)}, and the node's is ` +
-        `${hex(node)}: the replay differs from the node's, so nothing of the block is stored`,
-      { height: b.height, hash: hex(b.hash), computed: hex(applied.stateRoot), node: hex(node) },
-    );
+  if (nodeRoot !== null) {
+    // Traced apart: the wait for the node's root once the worker has answered is the node's time, not the apply's.
+    const rootFrom = performance.now();
+    const node = await nodeRoot;
+    traceAdd("rootWaitMs", performance.now() - rootFrom);
+    if (!(options.rootMatches ?? sameBytes)(applied.stateRoot, node)) {
+      const lastMatchedHeight = checks.lastMatched;
+      throw new UmbraError(
+        "root-mismatch",
+        `the ledger state root after block ${b.height} (${hex(b.hash)}) is ${hex(applied.stateRoot)}, and the node's is ` +
+          `${hex(node)}: the replay differs from the node's, so nothing of the block is stored; ` +
+          (lastMatchedHeight === null
+            ? "no root matched the node's in this process before it (the last match was in an earlier run), so restore a " +
+              "backup at or below the last height that run's /status showed as matched"
+            : `the last height whose root matched the node's is ${lastMatchedHeight}, so restore a backup at or below it`),
+        { height: b.height, hash: hex(b.hash), computed: hex(applied.stateRoot), node: hex(node), lastMatchedHeight },
+      );
+    }
+    source.rootMatched?.(b.height);
+  } else {
+    // A height whose root is not compared waits for none: the trace's key stays, at 0.
+    traceAdd("rootWaitMs", 0);
   }
+  checks.applied(appliedBlock, nodeRoot !== null);
   return applied;
 }
 

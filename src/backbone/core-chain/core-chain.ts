@@ -237,13 +237,31 @@ export async function checkChain(input: ChainCheckInput): Promise<ChainCheck> {
 }
 
 /**
- * The node client's options from the process's `core` settings: its `node` and `backoffCeilingMs`. Null for a process
- * without a node (a private process, whose `core` entry has none). The process makes its one node client from them
- * (`src/runner/process.ts`).
+ * The node client's options from the process's `core` settings: its `node`, `backoffCeilingMs` and batch size. Null for
+ * a process without a node (a private process, whose `core` entry has none). The process makes its one node client from
+ * them (`src/runner/process.ts`).
  */
 export function nodeOptionsOf(settings: Readonly<Record<string, unknown>>): NodeClientOptions | null {
   if (typeof settings.node !== "string") return null;
-  return { url: settings.node, backoffCeilingMs: settings.backoffCeilingMs as number };
+  return {
+    url: settings.node,
+    backoffCeilingMs: settings.backoffCeilingMs as number,
+    batchSize: nodeBatchSizeOf(settings.nodeBatchBlocks as number | undefined),
+  };
+}
+
+/**
+ * The most node calls a block of the prefetch makes together: its hash, its block, its events and its ledger root
+ * (`src/backbone/core-block-fetch/node-source.ts`).
+ */
+export const CALLS_PER_BLOCK = 4;
+
+/**
+ * The node client's `batchSize` for `nodeBatchBlocks` blocks: room for every call of that many blocks
+ * ({@link CALLS_PER_BLOCK} each), or 1 — every call in a frame of its own — for 1 (or none given).
+ */
+export function nodeBatchSizeOf(nodeBatchBlocks: number | undefined): number {
+  return nodeBatchBlocks === undefined || nodeBatchBlocks <= 1 ? 1 : nodeBatchBlocks * CALLS_PER_BLOCK;
 }
 
 /** What a process gives `core-chain` (see {@link bindCoreChain}). */

@@ -100,11 +100,12 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     const db = await backend.database();
     // Another block at height 1, notified once 3 has committed (the fence module's call after 3's commit lets it out).
     const other = branchOf(at(0), 1n, "b")[0] as ChainBlock;
+    // The head 3 and its parent 2 are known from the head read: only their content is asked (FR-011).
     const records = [
       ...opening(at(0), at(3)),
       ...finalized(at(1), RUNTIME, true),
-      ...finalized(at(2)),
-      ...finalized(at(3)),
+      ...content(at(2), RUNTIME, false),
+      ...content(at(3), RUNTIME, false),
       FENCE,
       finalizedHead(other),
     ];
@@ -139,14 +140,16 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     ];
     const fetches: FetchSeen[] = [];
     let status: (() => bigint | null) | undefined;
-    // The process's own node client, its block-hash calls watched: each marks the start of a height's fetch.
+    const heightOf = new Map(long.map((block) => [block.hex, block.height] as const));
+    // The process's own node client, its block calls watched: each is a height's fetch. (Its hash is read first by
+    // chain_getBlockHash while it catches up; the last window's, as the loop follows the head, are known: FR-011.)
     const watch = (client: NodeClient): NodeClient =>
       new Proxy(client, {
         get(target, property) {
-          if (property === "blockHash") {
-            return (height: bigint, options?: unknown) => {
-              fetches.push({ height, cursor: status?.() ?? 0n });
-              return target.blockHash(height, options as never);
+          if (property === "block") {
+            return (hash: Uint8Array, options?: unknown) => {
+              fetches.push({ height: heightOf.get(hex(hash)) ?? -1n, cursor: status?.() ?? 0n });
+              return target.block(hash, options as never);
             };
           }
           const value = Reflect.get(target, property, target) as unknown;
@@ -162,7 +165,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     } finally {
       await run.close();
     }
-    // Height 0 is startup's genesis read, not the prefetch's.
+    // Height 0 is startup's genesis read, not the prefetch's (it reads no block).
     const prefetched = fetches.filter((fetch) => fetch.height > 0n);
     expect(prefetched).toHaveLength(catchUp);
     // Fetched ahead of the cursor up to the window, never beyond it.
@@ -191,10 +194,13 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
   const B = branchOf(b100, 104n, "b");
   const a = (h: number) => A[h - 101] as ChainBlock;
   const b = (h: number) => B[h - 101] as ChainBlock;
-  /** A process following at S = 100 = the head, then the best blocks of `best` with their content's calls. */
+  /**
+   * A process following at S = 100 = the head, then the best blocks of `best` with their content's calls. 100's hash is
+   * the head read's: only its content is asked (FR-011).
+   */
   const following = (best: readonly ChainBlock[], rest: readonly TapeRecord[] = []): TapeRecord[] => [
     ...opening(head[0] as ChainBlock, b100),
-    ...finalized(b100, RUNTIME, true),
+    ...content(b100, RUNTIME, true),
     ...best.flatMap((block, index) => [newHead(block), ...content(block, RUNTIME, index === 0)]),
     ...rest,
   ];
@@ -203,7 +209,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     const db = await backend.database();
     const records = following(
       [a(101), a(102), a(103), b(101), b(102), b(103), b(104)],
-      [finalizedHead(b(101)), { method: "chain_getBlockHash", params: [101], result: b(101).hex }],
+      [finalizedHead(b(101))],
     );
     const run = await ingest(db, records, { start: 100n });
     try {
@@ -314,10 +320,11 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
       "SELECT encode(genesis_hash, 'hex') AS g, start_height::int AS s, encode(anchor_hash, 'hex') AS a FROM core_chain.identity",
     );
     expect(identity).toEqual({ g: g.hex.slice(2), s: 0, a: g.hex.slice(2) });
-    // Block 0's runtime and metadata at block 0 itself (`contentStateOf`); block 1's runtime there too.
+    // Block 0's runtime and metadata at block 0 itself (`contentStateOf`); blocks 1 and 2 take the version block 0
+    // confirmed, asking nothing.
     expect(run.node.calls.filter((c) => c.method === "state_getMetadata").map((c) => c.params)).toEqual([[g.hex]]);
-    const runtimes = run.node.calls.filter((c) => c.method === "state_getRuntimeVersion").map((c) => JSON.stringify(c.params));
-    expect(runtimes.sort()).toEqual([[g.hex], [g.hex], [hex((genesis[1] as ChainBlock).hash)]].map((p) => JSON.stringify(p)).sort());
+    const runtimes = run.node.calls.filter((c) => c.method === "state_getRuntimeVersion").map((c) => c.params);
+    expect(runtimes).toEqual([[g.hex]]);
     expect(run.seen.parsed.find((parsed) => parsed.height === 0n)?.calls).toEqual(time === null ? [] : ["Timestamp.set"]);
   }, PATIENCE_MS * 2);
 

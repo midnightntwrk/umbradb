@@ -614,7 +614,6 @@ describe("the tape node's call log and its refusals", { timeout: TEST_TIMEOUT_MS
       const frames = [
         "not json",
         "[]",
-        '[{"jsonrpc":"2.0","id":1,"method":"m","params":[]}]',
         '"text"',
         '{"jsonrpc":"1.0","id":4,"method":"m","params":[]}',
         '{"id":5,"method":"m","params":[]}',
@@ -634,7 +633,6 @@ describe("the tape node's call log and its refusals", { timeout: TEST_TIMEOUT_MS
         `{"jsonrpc":"2.0","id":${id},"error":{"code":-32600,"message":"Invalid Request"}}`;
       expect(client.texts.slice(0, frames.length)).toEqual([
         parse,
-        invalid("null"),
         invalid("null"),
         invalid("null"),
         invalid("4"),
@@ -710,6 +708,139 @@ describe("the tape node's call log and its refusals", { timeout: TEST_TIMEOUT_MS
     await closing;
     await client.closed;
     expect(node.connections).toBe(1);
+  });
+});
+
+describe("batch frames (FR-020 of the node call budget)", { timeout: TEST_TIMEOUT_MS }, () => {
+  const batch = (...requests: readonly (readonly [number | string, string, unknown])[]): string =>
+    JSON.stringify(requests.map(([id, method, params]) => ({ jsonrpc: "2.0", id, method, params })));
+
+  it("answers each request of a batch from the same records, in one array frame, and logs each with the frame", async () => {
+    const records: TapeRecord[] = [
+      { method: "chain_getBlockHash", params: [1], result: "0x01" },
+      { method: "chain_getBlockHash", params: [2], result: "0x02" },
+      { method: "chain_getBlockHash", params: [1], result: "0x01b" },
+      { method: "state_getStorage", params: ["0x02", "0x01"], error: { code: 4003, message: "gone" } },
+    ];
+    await withNode(records, async (node) => {
+      const client = await RawClient.open(node.url);
+      client.send(batch([1, "chain_getBlockHash", [1]], ["b", "chain_getBlockHash", [2]], [3, "state_getStorage", ["0x02", "0x01"]]));
+      await client.barrier();
+      // Occurrences go on from the batch: the single request is the pair's second.
+      expect((await client.call("chain_getBlockHash", [1], 4)).result).toBe("0x01b");
+      client.send(batch([5, "chain_getBlockHash", [1]], [6, "absent", []], [7, "chain_getBlockHash", [2]]));
+      await client.barrier();
+      expect(client.texts[0]).toBe(
+        '[{"jsonrpc":"2.0","id":1,"result":"0x01"},{"jsonrpc":"2.0","id":"b","result":"0x02"},' +
+          '{"jsonrpc":"2.0","id":3,"error":{"code":4003,"message":"gone"}}]',
+      );
+      expect(JSON.parse(client.texts[3] as string)).toEqual([
+        { jsonrpc: "2.0", id: 5, result: "0x01b" },
+        {
+          jsonrpc: "2.0",
+          id: 6,
+          error: { code: NOT_ON_TAPE_RPC_CODE, message: "not-on-tape: absent", data: { method: "absent", params: [], session: 1 } },
+        },
+        { jsonrpc: "2.0", id: 7, result: "0x02" },
+      ]);
+      expect(node.batches).toBe(2);
+      expect(node.calls.filter((call) => call.method !== BARRIER_METHOD)).toEqual([
+        { session: 1, method: "chain_getBlockHash", params: [1], occurrence: 1, line: 1, outcome: "answered", frame: 1 },
+        { session: 1, method: "chain_getBlockHash", params: [2], occurrence: 1, line: 2, outcome: "answered", frame: 1 },
+        { session: 1, method: "state_getStorage", params: ["0x02", "0x01"], occurrence: 1, line: 4, outcome: "answered", frame: 1 },
+        { session: 1, method: "chain_getBlockHash", params: [1], occurrence: 2, line: 3, outcome: "answered" },
+        { session: 1, method: "chain_getBlockHash", params: [1], occurrence: 3, line: 3, outcome: "repeated", frame: 2 },
+        { session: 1, method: "absent", params: [], occurrence: 1, line: null, outcome: "not-on-tape", frame: 2 },
+        { session: 1, method: "chain_getBlockHash", params: [2], occurrence: 2, line: 2, outcome: "repeated", frame: 2 },
+      ]);
+      expect(node.calls[3]).not.toHaveProperty("frame");
+      await client.close();
+    });
+  });
+
+  it("sends the array once its slowest answer is due, leaving out a timeout fault; no frame for none", async () => {
+    const timers = new ManualTimers();
+    const records: TapeRecord[] = [
+      { method: "fast", params: [], result: "f" },
+      { method: "slow", params: [], result: "s", delayMs: 300 },
+      { fault: "timeout", method: "lost", params: [] },
+      { fault: "error", method: "bad", params: [], code: -32000 },
+      { fault: "timeout", method: "lost", params: [1] },
+    ];
+    await withNode(
+      records,
+      async (node) => {
+        const client = await RawClient.open(node.url);
+        client.send(batch([1, "fast", []], [2, "slow", []], [3, "lost", []], [4, "bad", []], [5, "x", "not params"]));
+        await client.barrier();
+        await timers.advance(299);
+        await client.barrier();
+        expect(client.texts.filter((text) => text.startsWith("["))).toEqual([]);
+        await timers.advance(1);
+        await client.barrier();
+        expect(JSON.parse(client.texts.find((text) => text.startsWith("[")) as string)).toEqual([
+          { jsonrpc: "2.0", id: 1, result: "f" },
+          { jsonrpc: "2.0", id: 2, result: "s" },
+          { jsonrpc: "2.0", id: 4, error: { code: -32000, message: "tape fault: bad" } },
+          { jsonrpc: "2.0", id: 5, error: { code: -32600, message: "Invalid Request" } },
+        ]);
+        const before = client.texts.length;
+        client.send(batch([6, "lost", [1]]));
+        await client.barrier();
+        expect(client.texts.length).toBe(before + 1);
+        expect(node.calls.filter((call) => call.frame !== undefined).map((call) => [call.method, call.outcome, call.frame])).toEqual([
+          ["fast", "answered", 1],
+          ["slow", "answered", 1],
+          ["lost", "fault-timeout", 1],
+          ["bad", "fault-error", 1],
+          [null, "invalid-request", 1],
+          ["lost", "fault-timeout", 2],
+        ]);
+        await client.close();
+      },
+      manualClock(timers),
+    );
+  });
+
+  it("sends the notifications a batch's records let through after its array", async () => {
+    const records: TapeRecord[] = [
+      { subscribe: "s", method: "chain_subscribeFinalizedHeads", params: [] },
+      { method: "a", params: [], result: 1 },
+      { method: "b", params: [], result: 2 },
+      { notify: "s", result: "n" },
+    ];
+    await withNode(records, async (node) => {
+      const client = await RawClient.open(node.url);
+      await client.call("chain_subscribeFinalizedHeads", []);
+      client.send(batch(["a", "a", []]));
+      await client.barrier();
+      // The subscription's answer, the array, the barrier's answer: no notification yet.
+      expect(client.texts.length).toBe(3);
+      client.send(batch(["b", "b", []]));
+      await client.barrier();
+      expect(client.texts[1]).toBe('[{"jsonrpc":"2.0","id":"a","result":1}]');
+      expect(client.texts[3]).toBe('[{"jsonrpc":"2.0","id":"b","result":2}]');
+      expect(client.texts[4]).toBe(
+        '{"jsonrpc":"2.0","method":"chain_finalizedHead","params":{"subscription":"s","result":"n"}}',
+      );
+      await client.close();
+    });
+  });
+
+  it("refuses a batch with one −32600 (id null) when started with batches: false, as a node that takes none", async () => {
+    const node = await TapeNode.start({ records: [{ method: "m", params: [], result: 1 }], batches: false });
+    try {
+      const client = await RawClient.open(node.url);
+      client.send(batch([1, "m", []], [2, "m", []]));
+      await client.barrier();
+      expect(client.texts[0]).toBe('{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid Request"}}');
+      expect(node.batches).toBe(0);
+      expect(node.calls[0]).toEqual({ session: 1, method: null, params: null, occurrence: null, line: null, outcome: "invalid-request" });
+      expect((await client.call("m", [])).result).toBe(1);
+      await client.close();
+    } finally {
+      await node.close();
+    }
   });
 });
 

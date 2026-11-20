@@ -21,6 +21,8 @@
  *   way back (`backMs`) and the node requests' times (`nodeNoticeMs`, `nodeReadMs`, `nodeReads`);
  * - the ledger worker's lines, one per applied block, which the worker posts to this thread ({@link traceWorker},
  *   `./worker-trace.ts`): what its thread's time went to since the line before.
+ * - the node client's requests since the line before ({@link traceNode}, `src/node/counts.ts`): per method its calls,
+ *   tries sent, frames and failed calls. They are kept when a height is dropped, so the lines' sum is what was sent.
  *
  * **Where it goes.** A {@link TraceSink}, which the command builds over a file (`./file-sink.ts`). This module imports
  * no file API, so the browser build bundles it as it is. Lines are kept in memory and handed to the sink every
@@ -74,6 +76,8 @@ interface Active {
   /** The chain with the current height's step outputs, which replaces it when the height ends; null before any. */
   heightChain: Hash | null;
   block: Record<string, unknown>;
+  /** The node client's counts since the line before, by method ({@link traceNode}); not dropped with a height. */
+  node: Record<string, number[]>;
   lines: string[];
   worker: string[];
 }
@@ -110,6 +114,7 @@ export function startTrace(sink: TraceSink, options: TraceOptions = {}): void {
     chain: createHash("sha256"),
     heightChain: null,
     block: {},
+    node: {},
     lines: [],
     worker: [],
   };
@@ -229,6 +234,8 @@ export function traceEndBlock(height: bigint): void {
   if (memory !== null) active.block.mem = [memory.heap, memory.external, memory.rss];
   const line: Record<string, unknown> = { h: Number(height), t: performance.now(), ...active.block };
   for (const [key, value] of Object.entries(line)) if (typeof value === "number") line[key] = +value.toFixed(3);
+  if (Object.keys(active.node).length > 0) line.node = active.node;
+  active.node = {};
   active.lines.push(JSON.stringify(line));
   active.block = {};
   if (active.heightChain !== null) active.chain = active.heightChain;
@@ -244,6 +251,20 @@ export function traceDropBlock(): void {
   if (active === null) return;
   active.block = {};
   active.heightChain = null;
+}
+
+/** The places of a method's counts in a line's `node` entry: `[calls, attempts, frames, failures]`. */
+const NODE_COUNTS = { calls: 0, attempts: 1, frames: 2, failures: 3 } as const;
+
+/**
+ * Counts one of the node client's `kind` for `method` (`src/node/counts.ts`) in the next line's `node`: per method,
+ * `[calls, attempts, frames, failures]` since the line before. A height that is dropped ({@link traceDropBlock}) keeps
+ * them for the next line, so the lines together hold every request the client counted until the last line.
+ */
+export function traceNode(method: string, kind: keyof typeof NODE_COUNTS): void {
+  if (active === null) return;
+  const counts = (active.node[method] ??= [0, 0, 0, 0]);
+  counts[NODE_COUNTS[kind]] = (counts[NODE_COUNTS[kind]] as number) + 1;
 }
 
 /** Keeps one line of the ledger worker (`./worker-trace.ts`'s entry for an applied block). */

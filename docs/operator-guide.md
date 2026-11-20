@@ -138,9 +138,92 @@ On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` w
 - `tipCap`: the most best blocks the queue holds (the `core` entry's `tipCap`).
 - `finalityStall`: whether the queue is full, so that new best blocks wait for finality (the condition
   `finality-stall`).
+- `calls`: what the process asked of the node since it started, per method, for measuring a request budget (a
+  provider's daily quota). Each method the process used has `calls` (the calls made, each counted once however often it
+  was tried; a subscription is a call, and so is each one made again after a reconnect; a notification is not),
+  `attempts` (the tries sent, retries included; a try that found no connection sent nothing and is not one), `frames`
+  (the request frames that carried those tries: one per try sent alone; a JSON-RPC batch frame counts once under each
+  method it carries, so the frames of the methods add up to more than the frames sent) and `failures` (the
+  calls that ended without an answer after any retries, by code: `node-unreachable`, `node-error`, `node-requirement`,
+  `handle-closed`, `aborted` for a call the process itself ended, such as a prefetched root at a stop, and `other`). A
+  method never used is absent, and so is a failure code with none. The counts start from 0 each time the process
+  starts. Null only for the moment before the process makes its client. A provider that bills per request counts the
+  attempts; the requests per block are `attempts` over the heights committed. A provider that bills a batch as one
+  request counts the frames (`batches.frames`).
+- `batches`: the node client's request frames and batches (`nodeBatchBlocks`, see [Batches](#batches)): `frames`, the
+  request frames sent since the process started, a batch frame once whatever it carried; and `refused`, whether the
+  node refused a batch on the current connection, so that its calls go one per frame until the next connection. Null
+  only for the moment before the process makes its client.
+
+What a finalized height asks of the node: `chain_getBlockHash` and `chain_getBlock`, and `state_getStorage` (its
+`System::Events`) with `core-chain-events`. While the process follows the head (the head within `prefetchWindow` of
+the cursor), the finalized hashes come from the finalized-heads notifications, each naming its block and its parent,
+and from the queued best blocks' parent links, so `chain_getBlockHash` is asked only for a height none of them names
+(after a jump in finality, or a reconnect); a best block that finalizes is not fetched again. Following the tip with
+`core-chain-events` thus costs about 2 calls per block (`chain_getBlock` and `state_getStorage`), sent in one request
+frame with `nodeBatchBlocks` above 1 ([Batches](#batches)). Nothing is asked for
+a height above the core's `stop` (or the height before an upgrade boundary) the process will not process. With `core-ledger-state`, `midnight_ledgerStateRoot` is asked only at the
+heights whose root it compares (see [The ledger root check](#the-ledger-root-check)): at the default interval, 17 of
+the 10,001 heights of a sync from genesis to 10,000. The runtime that built a block is named in its header (its `MNSV` digest),
+so `state_getRuntimeVersion` is asked only at the first block of each runtime version the process sees (twice at a
+delayed upgrade's first block: its parent's state, then its own) and `state_getMetadata` once per runtime; the later
+blocks of a version are decoded with its cached metadata. A block whose extrinsics or events do not decode with that
+metadata is checked against the node in full before the error is reported, so a block that was not built by the runtime
+its header names still halts with `metadata-mismatch`.
 
 A private process has no node: its `node` is null. The process publishes what `/status` shows at least once a second,
 and at once when the connection's state changes.
+
+### Batches
+
+The node client sends the calls the process makes at the same time (in one turn of its event loop) as one JSON-RPC
+batch frame: an array of requests, which the node answers with an array of answers. The `core` entry's
+`nodeBatchBlocks` (8 by default) sets how many prefetched blocks' calls share a frame. During a catch-up the prefetch
+begins heights in groups of `nodeBatchBlocks`, asks their hashes together, and then asks each block together with its
+`System::Events` (with `core-chain-events`) and, at a height whose root is compared, its ledger root; a batch holds at
+most 4 × `nodeBatchBlocks` calls. The prefetch prepares `nodeBatchBlocks` heights at a time, or 8 when that is more, so
+below 8 its eight heights still share frames. At the tip a block's block and events go in one frame. The calls are
+exactly those of single frames; only the frames change. Measured on the mainnet tape 1,780,001–1,790,000 (a catch-up,
+`core-chain-events` on): 30,007 calls in 30,007 frames with `nodeBatchBlocks: 1`, in about 3,300 frames (0.33 per
+block) at 8, and in about 1,700 (0.17 per block) at 16; following a simulated tip, 2,012 calls in 1,012 frames over
+1,001 blocks.
+
+Each call keeps its own id, timeout, retries and `retry: false`: one call's error, or its missing answer, fails only
+that call, which is retried alone as a single call would be. A node that does not take batches answers one with a
+JSON-RPC error whose id is null (`-32600 Invalid Request`, or another code, such as a response over the node's size
+limit), or not at all. The client takes either as a refusal (an error with a null id while a batch waits for its
+answers, or a call's timeout in a batch none of whose calls was answered), sends every call of that connection alone
+from then on, and sends the refused batch's calls again, each alone, after the retry's back-off. The first refusal is
+logged once (`node refused a JSON-RPC batch …`) and `/status` shows `node.batches.refused` while that connection lasts;
+the next connection tries batches again. `nodeBatchBlocks: 1` sends every call in a frame of its own, as before the
+setting existed. A process recorded through the tape tools' recorder (`npx tsx tools/tape/main.ts record`) needs
+`nodeBatchBlocks: 1`: the recorder takes single frames only.
+
+## The ledger root check
+
+`core-ledger-state` replays every block into the ledger state and stores the state's root at every height. It compares
+that root with the node's (`midnight_ledgerStateRoot`) only at some heights, set by the `core` entry's
+`ledgerRootInterval` (600 by default, about an hour of blocks):
+
+- block 0, always (its root also decides how the genesis state is applied);
+- every height that is a multiple of `ledgerRootInterval`;
+- the first height of each run of processing: the process's start, and the height processed again after any retry, so
+  a restart never lengthens the unchecked gap;
+- the first block of each ledger-version change (the v8 → v9 conversion block) and of each runtime version change.
+
+A backup restore compares the backup's root with the node's whatever the interval (`backup-root-mismatch`).
+`ledgerRootInterval: 1` compares every height, as before the setting existed.
+
+A root that differs halts the process with `root-mismatch` before that height is stored. Its details hold the height,
+the block's hash, both roots, and `lastMatchedHeight`: the last height whose root matched the node's in this process
+(null when the first check after a start failed; the earlier run's `/status` showed its last match). A replay that
+differs from the node from some height d on is found at the next checked height, up to `ledgerRootInterval` − 1 blocks
+later, and the blocks from d to the height before the halt are already stored, with ledger data that may be wrong. The
+process does not rewind them: restore a backup taken at or below `lastMatchedHeight`, then start again. So keep backups
+(`backupOnSignal`, `backupAtStop`) at least as often as the interval.
+
+`/status`'s `ledger` shows `{ "lastRootMatch": "<height>" }`, the last height whose root matched in this process; it is
+null before the first check passes, without `core-ledger-state`, and on a private process.
 
 ## A paused loop on `/status`
 
@@ -420,7 +503,7 @@ that height.
 | `beginMs` | The wait for the block from its source, and the height's start. |
 | `prepareMs` | The points before the block's transaction (`on-fetch` to `on-compute`). It holds `applyMs` and `collectMs`. |
 | `applyMs`, `tx` | The block applied by the ledger worker, as the main thread waited for it, and the block's number of transactions. |
-| `rootWaitMs` | Of `applyMs`: the wait for the node's state root once the worker had answered. It is the node's time. |
+| `rootWaitMs` | Of `applyMs`: the wait for the node's state root once the worker had answered. It is the node's time; 0 at a height whose root is not compared (`ledgerRootInterval`). |
 | `collectMs` | The block's flush handed over to the reclamation, in memory. |
 | `stepMs`, `evictMs` | Inside `txMs`, at `on-settle`: the reclamation of the run of blocks the height ends (one block), its reads included, and the eviction of the nodes it deletes from the worker, awaited. |
 | `evictRefused` | 1 when the ledger package refused that eviction: the worker thread was ended and the block committed. |
@@ -440,6 +523,7 @@ that height.
 | `backMs` | From the worker posting an answer to the main thread handling it. |
 | `nodeNoticeMs`, `nodeReadMs`, `nodeReads` | The worker's requests for stored nodes: from the worker posting one to the main thread handling it, from then to the worker woken, and how many. |
 | `mem` | The main thread's memory in MiB: its JavaScript heap in use, what it holds outside the heap, and the process's resident set. |
+| `node` | The node requests since the line before, per method: `[calls, attempts, frames, failures]` as `/status`'s `node.calls` counts them (failures of all codes together). A height that does not commit keeps them for the next line, so the lines together hold every request until the last line; a run's first line also holds the startup's. Absent when nothing was sent since the line before. |
 
 Later changes may add keys to a line for the work they measure; the files and the shape of a line do not change.
 

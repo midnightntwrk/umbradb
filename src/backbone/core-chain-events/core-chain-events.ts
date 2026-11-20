@@ -9,7 +9,8 @@
  *
  * It decodes them with the `runtime-metadata` item: the metadata of the runtime in the parent block's state. At the
  * block U that enacts a runtime upgrade, that is the old runtime's, which executed U and wrote its events
- * (`./events.ts`).
+ * (`./events.ts`). Events that do not decode are reported after the source's full check of the block's runtime
+ * (`checkRuntime`), since the node source gives a confirmed runtime's metadata without asking the node.
  *
  * It puts the decoded events as `chain-events` ({@link ChainEvent}, in their order), so `core-block-parsed` and
  * `core-tx-results` can read them at `on-parse`. A block without an `Events` value (block 0) has none, and its metadata
@@ -94,12 +95,22 @@ export function runtimeMetadataOf(b: BlockContext, module: string): RuntimeMetad
   return metadata as RuntimeMetadataEntry;
 }
 
-/** Block `b`'s chain events: its `System::Events` from `source`, decoded with its `runtime-metadata`. */
+/**
+ * Block `b`'s chain events: its `System::Events` from `source`, decoded with its `runtime-metadata`. Events that do not
+ * decode are reported only after the source checked the block's runtime in full (`checkRuntime`), which throws
+ * `metadata-mismatch` when the metadata was not the runtime that built the block.
+ */
 export async function chainEventsOf(source: BlockEventSource, b: BlockContext): Promise<readonly ChainEvent[]> {
-  const bytes = await source.blockEvents({ height: b.height, hash: b.hash, parentHash: b.parentHash });
+  const block = { height: b.height, hash: b.hash, parentHash: b.parentHash };
+  const bytes = await source.blockEvents(block);
   if (bytes === null) return Object.freeze([]);
   const metadata = runtimeMetadataOf(b, CORE_CHAIN_EVENTS_ID);
-  return decodeChainEvents(metadataView(metadata.metadata, b.height), bytes, b.height);
+  try {
+    return decodeChainEvents(metadataView(metadata.metadata, b.height), bytes, b.height);
+  } catch (error) {
+    await source.checkRuntime?.(block, metadata.specVersion);
+    throw error;
+  }
 }
 
 /** `core-chain-events`' `on-fetch` (see the module comment). */

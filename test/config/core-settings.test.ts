@@ -12,6 +12,7 @@ import {
   PUBLIC_CORE_SCHEMA,
   RENAMED_CORE_SETTINGS,
 } from "../../src/config/core-settings.js";
+import { nodeBatchSizeOf } from "../../src/backbone/core-chain/core-chain.js";
 import { buildCoreVersion } from "../../src/config/build.js";
 import type { PrivateCoreSettings, PublicCoreSettings } from "../../src/config/entries.js";
 import { fieldKinds } from "../../src/config/validate.js";
@@ -47,6 +48,8 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   listen: ["operational", { default: { admin: "0.0.0.0:8081" } }],
   tipCap: ["operational", { default: 600 }],
   prefetchWindow: ["operational", { default: 64 }],
+  ledgerRootInterval: ["operational", { default: 600 }],
+  nodeBatchBlocks: ["operational", { default: 8 }],
   backoffCeilingMs: ["operational", { default: 30_000 }],
   backupAtStop: ["operational", "absent"],
   // SIGUSR2 writes a backup there.
@@ -124,6 +127,25 @@ describe("the core entry's fields, kinds and defaults", () => {
     const read = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, apiReadTimeoutMs: value }).success;
     expect([1, 30_000, MAX_READ_TIMEOUT_MS].map(read)).toEqual([true, true, true]);
     expect([0, MAX_READ_TIMEOUT_MS + 1, 1.5, "1000"].map(read)).toEqual([false, false, false, false]);
+  });
+
+  it("ledgerRootInterval is a whole number of at least 1 (1: every height's root compared), 600 unless given", () => {
+    const interval = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, ledgerRootInterval: value });
+    expect(interval(1).success).toBe(true);
+    expect(interval(10_000_000).success).toBe(true);
+    for (const value of [0, -1, 1.5, "600", null]) expect(interval(value).success, String(value)).toBe(false);
+    expect((PUBLIC_CORE_SCHEMA.parse(REQUIRED_PUBLIC) as { ledgerRootInterval: number }).ledgerRootInterval).toBe(600);
+  });
+
+  it("nodeBatchBlocks is a whole number of at least 1 (1: every call in a frame of its own), 8 unless given", () => {
+    const blocks = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, nodeBatchBlocks: value });
+    expect(blocks(1).success).toBe(true);
+    expect(blocks(64).success).toBe(true);
+    for (const value of [0, -1, 1.5, "8", null]) expect(blocks(value).success, String(value)).toBe(false);
+    expect((PUBLIC_CORE_SCHEMA.parse(REQUIRED_PUBLIC) as { nodeBatchBlocks: number }).nodeBatchBlocks).toBe(8);
+    // The node client's batch: room for each block's calls (hash, block, events, root); 1 sends no batch.
+    expect([1, 2, 8, 16].map(nodeBatchSizeOf)).toEqual([1, 8, 32, 64]);
+    expect(nodeBatchSizeOf(undefined)).toBe(1);
   });
 
   it("reclamationCache: keys a whole number from 0 (0: no copy), verify a boolean, each defaulted alone, nothing else", () => {

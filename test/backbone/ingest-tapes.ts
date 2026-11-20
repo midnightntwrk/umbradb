@@ -3,6 +3,7 @@ import {
   blockRef,
   type ChainBlock,
   chainOf,
+  content,
   finalized,
   finalizedHead,
   headRead,
@@ -34,6 +35,8 @@ import type { Decoded } from "./ingest-checks.js";
 export function a79Tape(chain: readonly ChainBlock[]): TapeRecord[] {
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
   const heights = (from: number, to: number): number[] => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  // A head read or a finalized notification names its height's hash and its parent's: those heights are known to the
+  // source following the head, so only their content is asked (FR-011); the others are asked by height.
   return [
     ...blockRef(at(0)),
     ...subscriptions(),
@@ -41,17 +44,19 @@ export function a79Tape(chain: readonly ChainBlock[]): TapeRecord[] {
     finalizedHead(at(10)),
     finalizedHead(at(13)),
     ...finalized(at(11), RUNTIME, true),
-    ...finalized(at(12)),
-    ...finalized(at(13)),
+    ...content(at(12), RUNTIME, false),
+    ...content(at(13), RUNTIME, false),
     finalizedHead(at(13)),
     finalizedHead(at(12)),
     { disconnect: true },
     // The client connects again and makes both subscriptions again; the source reads the head again.
     ...subscriptions(),
     ...headRead(at(16)),
-    ...heights(14, 16).flatMap((h) => finalized(at(h))),
+    ...finalized(at(14)),
+    ...heights(15, 16).flatMap((h) => content(at(h), RUNTIME, false)),
     finalizedHead(at(20)),
-    ...heights(17, 20).flatMap((h) => finalized(at(h))),
+    ...heights(17, 18).flatMap((h) => finalized(at(h))),
+    ...heights(19, 20).flatMap((h) => content(at(h), RUNTIME, false)),
   ];
 }
 
@@ -86,8 +91,11 @@ export function upgradeTape(): { records: TapeRecord[]; upgrade: ChainBlock[]; e
     ...finalized(block(3), stateAfter(2)),
     ...finalized(block(4), stateAfter(3), true),
     ...finalized(block(5), stateAfter(4)),
-    // What a source decoding with a block's own state would also read: block 1's metadata there, block 5's runtime.
+    // What a source decoding with a block's own state would also read: block 1's metadata there, and the runtime at
+    // blocks 1, 2 and 5 (the right source asks the runtime only at 1's and F's parents: the first block of each).
     { method: "state_getMetadata", params: [block(1).hex], result: hex(OLD.metadata) },
+    { method: "state_getRuntimeVersion", params: [block(1).hex], result: { specName: "midnight", specVersion: OLD.specVersion, implVersion: 0, transactionVersion: 2 } },
+    { method: "state_getRuntimeVersion", params: [block(2).hex], result: { specName: "midnight", specVersion: OLD.specVersion, implVersion: 0, transactionVersion: 2 } },
     { method: "state_getRuntimeVersion", params: [block(5).hex], result: { specName: "midnight", specVersion: NEW.specVersion, implVersion: 0, transactionVersion: 2 } },
   ];
   const expected: Decoded[] = [1, 2, 3, 4, 5].map((h) => ({

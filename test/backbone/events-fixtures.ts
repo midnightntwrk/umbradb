@@ -376,8 +376,8 @@ export function eventsRead(block: ChainBlock, events: Uint8Array | null): TapeRe
 }
 
 /**
- * The calls of a finalized height with its events: `chain_getBlockHash`, its content ({@link content}: the block, the
- * runtime version at its parent's state and, when `metadata`, the metadata there) and `System::Events` at its hash.
+ * The calls of a finalized height with its events: `chain_getBlockHash`, its content ({@link content}: the block and,
+ * when `metadata`, the runtime version and metadata at its parent's state) and `System::Events` at its hash.
  */
 export function finalizedWithEvents(block: ChainBlock, runtime: EventsRuntime, events: Uint8Array | null, metadata = false): TapeRecord[] {
   return [

@@ -50,7 +50,10 @@ const bestRecords = (): TapeRecord[] => best.flatMap((block, index) => [newHead(
  */
 const firstTape = (): TapeRecord[] => [
   ...opening(genesis, head),
-  ...chain.slice(1).flatMap((block, index) => finalized(block, RUNTIME, index === 0)),
+  // F and its parent are the head read's, their hashes known: only their content is asked (FR-011).
+  ...chain.slice(1).flatMap((block, index) =>
+    block.height >= F - 1n ? content(block, RUNTIME, index === 0) : finalized(block, RUNTIME, index === 0),
+  ),
   FENCE,
   ...bestRecords(),
 ];

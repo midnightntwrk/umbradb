@@ -106,6 +106,70 @@ describe("/status's JSON schema", () => {
     expect(STATUS_SCHEMA.problems({ ...body(), node: null })).toEqual([]);
   });
 
+  it("holds the node client's call counts per method, or null; and refuses an unknown method, code or field", () => {
+    const node = (body() as { node: Record<string, unknown> }).node;
+    expect(node.calls).toBeNull();
+    const calls = {
+      chain_getBlock: { calls: 3, attempts: 5, frames: 5, failures: { "node-unreachable": 1, aborted: 1 } },
+      chain_subscribeNewHeads: { calls: 1, attempts: 1, frames: 1, failures: {} },
+    };
+    expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, calls } })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, calls: {} } })).toEqual([]);
+    const wrong = [
+      { rpc_methods: { calls: 1, attempts: 1, frames: 1, failures: {} } },
+      { chain_getBlock: { calls: 1, attempts: 1, frames: 1, failures: { teapot: 1 } } },
+      { chain_getBlock: { calls: 1, attempts: 1, frames: 1, failures: { "node-error": 0 } } },
+      { chain_getBlock: { calls: -1, attempts: 1, frames: 1, failures: {} } },
+      { chain_getBlock: { calls: 1, attempts: 1, failures: {} } },
+      { chain_getBlock: { calls: 1, attempts: 1, frames: 1, failures: {}, retries: 0 } },
+    ];
+    for (const shown of wrong) {
+      expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, calls: shown } }), JSON.stringify(shown)).not.toEqual([]);
+    }
+    const { calls: _calls, ...without } = node;
+    expect(STATUS_SCHEMA.problems({ ...body(), node: without })).not.toEqual([]);
+  });
+
+  it("holds the node client's frames and batch refusal, or null; and refuses another form", () => {
+    const node = (body() as { node: Record<string, unknown> }).node;
+    expect(node.batches).toBeNull();
+    for (const batches of [{ frames: 0, refused: false }, { frames: 12, refused: true }]) {
+      expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, batches } })).toEqual([]);
+    }
+    for (const wrong of [{ frames: -1, refused: false }, { frames: 1 }, { refused: true }, { frames: 1, refused: "no" }, { frames: 1, refused: false, size: 8 }, 3]) {
+      expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, batches: wrong } }), JSON.stringify(wrong)).not.toEqual([]);
+    }
+    const { batches: _batches, ...without } = node;
+    expect(STATUS_SCHEMA.problems({ ...body(), node: without })).not.toEqual([]);
+  });
+
+  it("holds the ledger's last matched root check, or null; and refuses another form", () => {
+    expect((body() as { ledger: unknown }).ledger).toBeNull();
+    expect(STATUS_SCHEMA.problems({ ...body(), ledger: { lastRootMatch: "600" } })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), ledger: { lastRootMatch: "0" } })).toEqual([]);
+    for (const wrong of [{ lastRootMatch: 600 }, { lastRootMatch: "-1" }, { lastRootMatch: "0600" }, {}, { lastRootMatch: "6", interval: 1 }]) {
+      expect(STATUS_SCHEMA.problems({ ...body(), ledger: wrong }), JSON.stringify(wrong)).not.toEqual([]);
+    }
+    // The snapshot shows the node source's lastRootMatch on the core, and nothing on a private process.
+    const facts = (side: "public" | "private") => ({
+      livenessTimeoutMs: 30_000,
+      readinessLag: null,
+      redactor: null,
+      config: UNVALIDATED_CONFIG,
+      startedNs: 0n,
+      side,
+      instanceId: side === "private" ? "keeper" : null,
+      tipCap: 600,
+      lastCommitMs: null,
+      modules: null,
+      digests: new Map(),
+      node: { bestHead: null, connection: null, queueDepth: null, calls: null, lastRootMatch: 1_200n },
+    });
+    const status = statusOf({ phase: "running", start: 0n, cursor: 1_250n, head: 1_250n, followingThreshold: 3, readinessLag: null, conditions: [], ended: null, reason: null });
+    expect(snapshotOf(status, facts("public")).status.ledger).toEqual({ lastRootMatch: "1200" });
+    expect(snapshotOf(status, facts("private")).status.ledger).toBeNull();
+  });
+
   it("holds slow-block: the height, the point, the module or null while none runs", () => {
     const slow = { code: "slow-block", height: "4", point: "on-compute", module: "m" };
     expect(STATUS_SCHEMA.problems({ ...body(), conditions: [slow] })).toEqual([]);
@@ -293,8 +357,8 @@ describe.each(PROCESS_BACKENDS)("/status through the process validates in every 
     // A core with no transport and no lockstep list: no private instance.
     expect(shown).toMatchObject({ state: "following", instance: { role: "core", id: null }, public: null, ledger: null, privateInstances: [] });
     // The in-memory source keeps no best-block queue and hears no best head. The process's node client, which it never
-    // uses, has not connected: it shows `connecting`, as before the first connection.
-    expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false });
+    // uses, has not connected: it shows `connecting`, as before the first connection, and has counted no call.
+    expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false, calls: {}, batches: { frames: 0, refused: false } });
     const committed = Date.parse(shown.lastCommitAt);
     expect(committed).toBeGreaterThanOrEqual(before);
     expect(committed).toBeLessThanOrEqual(after);

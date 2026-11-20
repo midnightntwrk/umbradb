@@ -4,7 +4,9 @@
  * - **`node-unreachable`, retryable** (retried with back-off): the connection could not be made
  *   (`reason: connect-failed`, `cause`: the system's code), was refused with HTTP 429 or a 5xx status (`http-status`,
  *   `status`), or was lost (`connection-closed`, `closeCode`); a call or a connection attempt got no answer within its
- *   timeout (`timeout`, `connect-timeout`, `timeoutMs`); or the node applied its own rate limit (`rate-limited`).
+ *   timeout (`timeout`, `connect-timeout`, `timeoutMs`); the node applied its own rate limit (`rate-limited`); or the
+ *   node refused a JSON-RPC batch the call went in, or answered none of it, and the call is sent again on its own
+ *   (`batch-refused`).
  * - **`node-requirement`, not retryable** (the process halts, since the node cannot serve what the indexer needs): the
  *   node has no block it must serve (a `null` block hash, header or block: `block-unavailable`, with `height` or
  *   `block`), or says the state at a block is gone, as a pruned node does (`state-unavailable`).
@@ -126,6 +128,16 @@ export function callTimedOut(method: NodeMethod, timeoutMs: number): UmbraError 
   });
 }
 
+/** A call in a batch frame the node refused, or answered nothing of within the call's timeout: sent again alone. */
+export function batchRefused(method: NodeMethod): UmbraError {
+  return new UmbraError(
+    "node-unreachable",
+    `${method}: the node refused the JSON-RPC batch this call went in, or answered none of it; the call is sent ` +
+      "again on its own, and this connection sends no more batches",
+    { method, reason: "batch-refused" },
+  );
+}
+
 /** What a failed or ended connection means for a call of `method` on it (`null`: for the connection itself). */
 export function connectionFailure(
   failure: ConnectionFailure,
@@ -187,7 +199,7 @@ export function invalidParameter(method: NodeMethod, parameter: string, expected
 
 /** A client option that cannot be used (the URL never shown). */
 export function invalidOption(
-  field: "node" | "callTimeoutMs" | "backoffCeilingMs" | "heartbeatMs",
+  field: "node" | "callTimeoutMs" | "backoffCeilingMs" | "heartbeatMs" | "batchSize",
   reason: string,
 ): UmbraError {
   const what =
@@ -195,7 +207,9 @@ export function invalidOption(
       ? "the node's address must be a ws or wss:// URL"
       : field === "heartbeatMs"
         ? "heartbeatMs must be a whole number of milliseconds from 1 to 2147483647"
-        : `${field} must be a positive integer of milliseconds`;
+        : field === "batchSize"
+          ? "batchSize must be a positive integer of calls"
+          : `${field} must be a positive integer of milliseconds`;
   return new UmbraError("invalid-configuration", `the node client cannot start: ${what}`, { field, reason });
 }
 

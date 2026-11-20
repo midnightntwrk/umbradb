@@ -11,6 +11,23 @@
  * paired with its call by id, in whatever order answers come; an answer whose call already ended (timed out, aborted)
  * is dropped.
  *
+ * **Batches.** With `batchSize` above 1 (`nodeBatchBlocks` × 4 in a process, see `nodeOptionsOf`), the calls made in
+ * the same turn of the event loop leave together, as one JSON-RPC 2.0 batch frame (an array of requests) of at most
+ * `batchSize` calls; a call made alone in its turn still leaves in a frame of its own, as with `batchSize` 1 (the
+ * default), where every call does. Nothing else changes for a call: it keeps its own id, timeout, `signal`, retries and
+ * `retry: false`; the node's array of answers is read answer by answer, each paired with its call by id; and a call the
+ * array leaves out times out alone, as an unanswered single call does. A subscription is never batched: it is sent at
+ * once in a frame of its own. The client sends a batch only once the turn's calls are all made: it waits for the next
+ * turn (`setImmediate`) unless the batch is full.
+ *
+ * A node that does not take batches answers one with a single JSON-RPC error whose id is null (−32600 Invalid Request,
+ * or its own code), or never answers it. Either is taken as a refusal: an error with a null id while a batch is
+ * unanswered, or a call's timeout in a batch of which no call was answered. The connection then sends every call in a
+ * frame of its own until it ends (the next connection tries batches again), and each call of a batch still unanswered
+ * fails its try with a retryable `batch-refused` (`./errors.ts`), so it is sent again on its own after the retry's
+ * back-off, or fails with `retry: false`. `onBatchRefused` reports the first refusal of the client's life, and
+ * {@link NodeClient.batchesRefused} whether the current connection refused.
+ *
  * **Subscriptions.** {@link NodeClient.subscribeNewHeads} and {@link NodeClient.subscribeFinalizedHeads} deliver each
  * notification's header, in the order the node sends them, from the subscription's answer on (including a
  * notification read in the same batch as the answer). A cancelled subscription is dropped on the client's side and
@@ -48,10 +65,16 @@
  *
  * **Errors** are `UmbraError`s (`./errors.ts`) whose codes say whether the failure is retried or halts the process.
  * None names the node's URL, which is a `secret` field.
+ *
+ * **Counts.** {@link NodeClient.calls} holds, per method, the calls made, the tries sent, the frames they went in and
+ * the calls that failed, by code, since the client was made (`./counts.ts`); `/status` shows them, and the block trace
+ * adds them to its lines. A batch counts one try for each call in it and one frame for each method it carries;
+ * {@link NodeClient.frames} counts each frame sent once.
  */
 
 import { UmbraError } from "../db/errors.js";
 import { backoffDelay } from "./backoff.js";
+import { failureCode, type NodeCallCounts, NodeCallCounter } from "./counts.js";
 import {
   blockAnswer,
   byteArrayAnswer,
@@ -71,6 +94,7 @@ import {
 } from "./decode.js";
 import {
   badAnswer,
+  batchRefused,
   blockUnavailable,
   callTimedOut,
   clientClosed,
@@ -111,6 +135,13 @@ export interface NodeClientOptions {
   readonly onRetryingChange?: (retrying: boolean) => void;
   /** Called each time {@link NodeClient.connection} changes, with the new state. */
   readonly onConnectionChange?: (connection: NodeConnection) => void;
+  /**
+   * The most calls one request frame carries (see the module comment, **Batches**): the calls made in one turn leave
+   * as one JSON-RPC batch of up to this many; 1 (the default) sends every call in a frame of its own.
+   */
+  readonly batchSize?: number;
+  /** Called the first time the node refuses a batch (see the module comment): calls go singly on that connection. */
+  readonly onBatchRefused?: () => void;
 }
 
 /** One call's options. */
@@ -161,6 +192,12 @@ interface Connection {
   opened: boolean;
   ended: boolean;
   connectTimer: unknown;
+  /** The tries made in this turn, to leave in its batch (`#send`, `#flush`). */
+  readonly outbox: Outgoing[];
+  /** A flush of the outbox is due at the next turn. */
+  flushDue: boolean;
+  /** The node refused a batch on this connection: every call goes in a frame of its own. */
+  batchesRefused: boolean;
   /** Resolves `close()` once the socket reports it ended. */
   whenEnded?: () => void;
 }
@@ -176,9 +213,27 @@ interface Pending {
   readonly method: NodeMethod;
   /** Reads the answer as soon as it arrives, before any later message (a subscription's id). */
   readonly onAnswer: ((result: unknown) => void) | undefined;
+  /** The batch frame the try went in; undefined while it waits in the outbox, and for a frame of its own. */
+  frame: BatchFrame | undefined;
   resolve(result: unknown): void;
   reject(error: unknown): void;
 }
+
+/** A try waiting in the outbox: its request, written. */
+interface Outgoing {
+  readonly id: number;
+  readonly method: NodeMethod;
+  readonly text: string;
+}
+
+/** A batch frame sent: whether any of its calls was answered. */
+interface BatchFrame {
+  answered: boolean;
+}
+
+/** Runs `run` in the event loop's next turn, after the promise reactions and the frames already read of this one. */
+const nextTurn: (run: () => void) => void =
+  typeof setImmediate === "function" ? (run) => void setImmediate(run) : (run) => void setTimeout(run, 0);
 
 interface Subscription {
   readonly method: SubscribeMethod;
@@ -199,6 +254,8 @@ export class NodeClient {
   readonly #onRetry: ((retry: NodeRetry) => void) | undefined;
   readonly #onRetryingChange: ((retrying: boolean) => void) | undefined;
   readonly #onConnectionChange: ((connection: NodeConnection) => void) | undefined;
+  readonly #batchSize: number;
+  readonly #onBatchRefused: (() => void) | undefined;
 
   #state: State = "idle";
   #connection: Connection | undefined;
@@ -209,6 +266,8 @@ export class NodeClient {
   #reconnecting = false;
   #retryingCalls = 0;
   #reported = false;
+  /** A batch refusal was reported (`onBatchRefused`): only the first is. */
+  #refusalReported = false;
   /** The connection's state last reported to `onConnectionChange` (a new client's is `connecting`). */
   #reportedConnection: NodeConnection = "connecting";
   #nextId = 1;
@@ -218,6 +277,7 @@ export class NodeClient {
   readonly #sleeps = new Set<(error: unknown) => void>();
   readonly #subscriptions = new Set<Subscription>();
   readonly #byNodeId = new Map<string, Subscription>();
+  readonly #counts = new NodeCallCounter();
 
   constructor(options: NodeClientOptions) {
     let url: URL;
@@ -235,6 +295,10 @@ export class NodeClient {
     this.#onRetry = options.onRetry;
     this.#onRetryingChange = options.onRetryingChange;
     this.#onConnectionChange = options.onConnectionChange;
+    const batchSize = options.batchSize ?? 1;
+    if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw invalidOption("batchSize", "not-a-positive-integer");
+    this.#batchSize = batchSize;
+    this.#onBatchRefused = options.onBatchRefused;
   }
 
   /**
@@ -252,6 +316,24 @@ export class NodeClient {
     if (this.#state === "closed") return "closed";
     if (this.#state === "open") return "connected";
     return this.#reconnecting ? "retrying" : "connecting";
+  }
+
+  /**
+   * The calls, tries sent, frames and failed calls of each method used since the client was made (`./counts.ts`), as
+   * plain frozen data.
+   */
+  get calls(): NodeCallCounts {
+    return this.#counts.snapshot();
+  }
+
+  /** The request frames sent since the client was made, a batch once whatever it carried (`./counts.ts`). */
+  get frames(): number {
+    return this.#counts.frames;
+  }
+
+  /** Whether the node refused a batch on the current connection, which then sends every call alone (module comment). */
+  get batchesRefused(): boolean {
+    return this.#connection?.batchesRefused ?? false;
   }
 
   /** `chain_getFinalizedHead`: the hash of the node's finalized head. */
@@ -456,6 +538,7 @@ export class NodeClient {
     }
     const signal = options.signal;
     if (this.#state === "closed") throw clientClosed();
+    this.#counts.call(method);
     let attempt = 0;
     try {
       for (;;) {
@@ -474,6 +557,9 @@ export class NodeClient {
           await this.#sleep(delayMs, signal);
         }
       }
+    } catch (error) {
+      this.#counts.failed(method, failureCode(error, signal?.aborted === true));
+      throw error;
     } finally {
       if (attempt > 0) {
         this.#retryingCalls -= 1;
@@ -495,8 +581,8 @@ export class NodeClient {
     // An abort while the connection opened has no listener yet: nothing is sent for it.
     signal?.throwIfAborted();
     // The connection opened; a socket may still have ended it before this continuation ran.
-    const socket = this.#state === "open" ? this.#connection?.socket : undefined;
-    if (socket === undefined) {
+    const connection = this.#state === "open" ? this.#connection : undefined;
+    if (connection?.socket === undefined) {
       if (this.#state === "closed") throw clientClosed();
       throw connectionFailure(this.#lastFailure as ConnectionFailure, method, this.#timeoutMs);
     }
@@ -511,13 +597,10 @@ export class NodeClient {
         settle();
         reject(signal?.reason);
       };
-      const timer = this.#timers.setTimeout(() => {
-        settle();
-        reject(callTimedOut(method, timeoutMs));
-      }, timeoutMs);
-      this.#pending.set(id, {
+      const pending: Pending = {
         method,
         onAnswer,
+        frame: undefined,
         resolve: (result) => {
           settle();
           resolve(result);
@@ -526,10 +609,74 @@ export class NodeClient {
           settle();
           reject(error);
         },
-      });
+      };
+      const timer = this.#timers.setTimeout(() => {
+        settle();
+        // A batch of which no call was answered within this call's timeout: the node is taken not to answer batches.
+        if (pending.frame !== undefined && !pending.frame.answered) this.#refuseBatches(connection);
+        reject(callTimedOut(method, timeoutMs));
+      }, timeoutMs);
+      this.#pending.set(id, pending);
       signal?.addEventListener("abort", onAbort, { once: true });
-      socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+      this.#send(connection, { id, method, text: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
     });
+  }
+
+  /**
+   * Sends a try (see the module comment, **Batches**): at once in a frame of its own when batches are off or refused on
+   * the connection, or for a subscription (never batched); else into the connection's outbox, which leaves at the next
+   * turn, or now once it holds `batchSize` tries.
+   */
+  #send(connection: Connection, outgoing: Outgoing): void {
+    if (this.#batchSize === 1 || connection.batchesRefused || !isNodeCallMethod(outgoing.method)) {
+      this.#counts.sent(outgoing.method);
+      (connection.socket as NodeSocket).send(outgoing.text);
+      return;
+    }
+    connection.outbox.push(outgoing);
+    if (connection.outbox.length >= this.#batchSize) {
+      this.#flush(connection);
+    } else if (!connection.flushDue) {
+      connection.flushDue = true;
+      nextTurn(() => this.#flush(connection));
+    }
+  }
+
+  /**
+   * Sends the connection's outbox: the tries still waiting for an answer (an abort or a lost connection ended the
+   * others), as one batch frame, or alone when one is left or the connection refused batches meanwhile.
+   */
+  #flush(connection: Connection): void {
+    connection.flushDue = false;
+    const ready = connection.outbox.splice(0).filter((outgoing) => this.#pending.has(outgoing.id));
+    const socket = connection.socket;
+    if (ready.length === 0 || socket === undefined || connection.ended || connection !== this.#connection) return;
+    if (ready.length === 1 || connection.batchesRefused) {
+      for (const outgoing of ready) {
+        this.#counts.sent(outgoing.method);
+        socket.send(outgoing.text);
+      }
+      return;
+    }
+    const frame: BatchFrame = { answered: false };
+    for (const outgoing of ready) (this.#pending.get(outgoing.id) as Pending).frame = frame;
+    this.#counts.sentBatch(ready.map((outgoing) => outgoing.method));
+    socket.send(`[${ready.map((outgoing) => outgoing.text).join(",")}]`);
+  }
+
+  /**
+   * The node refused a batch, or answered none of one (see the module comment): the connection sends every call alone
+   * from now on, and each call of a batch still unanswered fails its try with `batch-refused`, to be sent again alone.
+   */
+  #refuseBatches(connection: Connection): void {
+    if (connection.batchesRefused || connection !== this.#connection) return;
+    connection.batchesRefused = true;
+    for (const pending of [...this.#pending.values()]) {
+      if (pending.frame !== undefined && !pending.frame.answered) pending.reject(batchRefused(pending.method));
+    }
+    if (this.#refusalReported) return;
+    this.#refusalReported = true;
+    this.#onBatchRefused?.();
   }
 
   /** Resolves once the connection is open; with `retry: false`, fails at once while there is none. */
@@ -570,7 +717,15 @@ export class NodeClient {
 
   #startConnecting(): void {
     this.#state = "connecting";
-    const connection: Connection = { socket: undefined, opened: false, ended: false, connectTimer: undefined };
+    const connection: Connection = {
+      socket: undefined,
+      opened: false,
+      ended: false,
+      connectTimer: undefined,
+      outbox: [],
+      flushDue: false,
+      batchesRefused: false,
+    };
     this.#connection = connection;
     connection.connectTimer = this.#timers.setTimeout(
       () => this.#ended(connection, { kind: "connect-timeout" }),
@@ -611,13 +766,23 @@ export class NodeClient {
     } catch {
       message = undefined;
     }
+    if (Array.isArray(message)) {
+      // A batch's answers, each read as an answer in a frame of its own.
+      if (message.length === 0 || !message.every((answer) => isRecord(answer) && answer.jsonrpc === "2.0" && "id" in answer)) {
+        this.#ended(connection, { kind: "bad-frame" });
+        return;
+      }
+      this.#failures = 0;
+      for (const answer of message) this.#answer(connection, answer as Record<string, unknown>);
+      return;
+    }
     if (!isRecord(message) || message.jsonrpc !== "2.0") {
       this.#ended(connection, { kind: "bad-frame" });
       return;
     }
     if ("id" in message) {
       this.#failures = 0;
-      this.#answer(message);
+      this.#answer(connection, message);
       return;
     }
     const params = message.params;
@@ -631,9 +796,15 @@ export class NodeClient {
     this.#notification(params.subscription, params.result);
   }
 
-  #answer(message: Record<string, unknown>): void {
+  #answer(connection: Connection, message: Record<string, unknown>): void {
+    // An error no call's id names, while a batch waits for its answers: the node refused the batch.
+    if (message.id === null && "error" in message && this.#batchUnanswered()) {
+      this.#refuseBatches(connection);
+      return;
+    }
     const pending = typeof message.id === "number" ? this.#pending.get(message.id) : undefined;
     if (pending === undefined) return;
+    if (pending.frame !== undefined) pending.frame.answered = true;
     if ("error" in message) {
       pending.reject(rpcFailure(pending.method, message.error));
       return;
@@ -649,6 +820,12 @@ export class NodeClient {
       return;
     }
     pending.resolve(message.result);
+  }
+
+  /** Whether a call sent in a batch of which no call was answered yet still waits. */
+  #batchUnanswered(): boolean {
+    for (const pending of this.#pending.values()) if (pending.frame !== undefined && !pending.frame.answered) return true;
+    return false;
   }
 
   #notification(id: unknown, result: unknown): void {

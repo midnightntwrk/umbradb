@@ -65,7 +65,8 @@ const b = (height: number): ChainBlock => BRANCH_B[height - 101] as ChainBlock;
 export function a168Tape(): TapeRecord[] {
   return [
     ...opening(CHAIN[0] as ChainBlock, HEAD),
-    ...finalized(HEAD, RUNTIME, true),
+    // The head read's hash is known: only its content is asked (FR-011).
+    ...content(HEAD, RUNTIME, true),
     newHead(a(101)),
     ...content(a(101), RUNTIME, true),
     newHead(a(102)),
@@ -74,7 +75,6 @@ export function a168Tape(): TapeRecord[] {
     newHead(b(102)),
     FENCE,
     finalizedHead(a(101)),
-    { method: "chain_getBlockHash", params: [101], result: a(101).hex },
   ];
 }
 

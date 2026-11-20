@@ -19,9 +19,19 @@
  * {@link RuntimeMetadata} caches the metadata by that `spec_version`: the version of the runtime read at the same hash
  * the metadata is read at, after the check, so a runtime's metadata is never stored under another version. It reads
  * each version's metadata once, also when several blocks ask for it at the same time (the finalized prefetch). A read
- * that fails leaves nothing behind, so the next block reads it again. Every block costs one `state_getRuntimeVersion`
- * (the parent's), the first block of a delayed upgrade a second (its own), and a version's first block one
- * `state_getMetadata`.
+ * that fails leaves nothing behind, so the next block reads it again.
+ *
+ * **Confirmed versions.** A version whose check passed for a block and whose metadata was read is *confirmed* for the
+ * cache's life (the process's, for the node source's cache). A later block whose `MNSV` version is confirmed is decoded
+ * with that version's cached metadata without a node call: the check could only give that same entry, since the cache
+ * holds one metadata per version. So a run costs one `state_getRuntimeVersion` at its first block of each version (two
+ * at the first block of a delayed upgrade: its parent's, then its own) and one `state_getMetadata` per version, not one
+ * call per block. Blocks that ask for an unconfirmed version while another block's check of it is in flight wait for
+ * that check and take its answer when it confirms the version; when it does not (a mismatch, a failed call), each
+ * makes its own. What the cache no longer catches is a block whose `MNSV` names a confirmed version that did not build
+ * it: such a block no longer halts with `metadata-mismatch` at the version check. Its content is then decoded with the
+ * wrong metadata, which fails, and the caller checks the block in full before reporting the failure (`{ check: true }`,
+ * FR-003 of the node call budget): `metadata-mismatch` where the check finds one, else the decode's own error.
  *
  * {@link RuntimeMetadata.forState} gives the metadata of the runtime in a block's own state, which reads of that state
  * (storage, runtime calls) use. It differs from the metadata of the block's content only at the earlier form's U.
@@ -72,6 +82,10 @@ export class RuntimeMetadata {
   readonly #reads = new Map<number, Promise<Uint8Array>>();
   /** The metadata read so far, by `spec_version`. */
   readonly #cached = new Map<number, Uint8Array>();
+  /** The confirmed `spec_version`s (see the module comment): checked for a block, their metadata read. */
+  readonly #confirmed = new Set<number>();
+  /** The checks in flight, by the `MNSV` version they check: what a block asking for that version waits for. */
+  readonly #checks = new Map<number, Promise<unknown>>();
 
   constructor(node: MetadataNode) {
     this.#node = node;
@@ -80,14 +94,40 @@ export class RuntimeMetadata {
   /**
    * The metadata `block`'s content is decoded with: the runtime in its parent's state (block 0: its own) when its
    * `spec_version` is the block's `MNSV` version, else the runtime in the block's own state when its is (see the module
-   * comment). Throws `metadata-mismatch` when neither is, having read no metadata.
+   * comment). Throws `metadata-mismatch` when neither is, having read no metadata. A confirmed version's cached metadata
+   * is given without a node call, unless `options.check` asks for the check whatever was confirmed.
    */
-  async forBlock(block: MetadataBlock): Promise<RuntimeMetadataEntry> {
+  async forBlock(block: MetadataBlock, options?: { readonly check?: boolean }): Promise<RuntimeMetadataEntry> {
+    if (options?.check !== true) {
+      // Without a check in flight, nothing is awaited before this block's own check is registered below, so blocks
+      // asked for at the same time wait for the first one's check (and, when it fails, for the next one's).
+      const pending = (): Promise<unknown> | undefined =>
+        this.#confirmed.has(block.specVersion) ? undefined : this.#checks.get(block.specVersion);
+      for (let check = pending(); check !== undefined; check = pending()) await check;
+      const metadata = this.#confirmed.has(block.specVersion) ? this.#cached.get(block.specVersion) : undefined;
+      if (metadata !== undefined) return Object.freeze({ specVersion: block.specVersion, metadata });
+    }
+    const check = this.#check(block);
+    if (!this.#checks.has(block.specVersion)) {
+      const settled = check.then(
+        () => undefined,
+        () => undefined,
+      );
+      this.#checks.set(block.specVersion, settled);
+      void settled.then(() => {
+        if (this.#checks.get(block.specVersion) === settled) this.#checks.delete(block.specVersion);
+      });
+    }
+    return check;
+  }
+
+  /** The check of `block` (see {@link forBlock}), which confirms its version when it passes. */
+  async #check(block: MetadataBlock): Promise<RuntimeMetadataEntry> {
     const at = contentStateOf(block);
     const { specVersion } = await this.#node.runtimeVersion(at);
-    if (specVersion === block.specVersion) return this.#entry(at, specVersion);
+    if (specVersion === block.specVersion) return this.#confirm(await this.#entry(at, specVersion));
     const own = at === block.hash ? specVersion : (await this.#node.runtimeVersion(block.hash)).specVersion;
-    if (own === block.specVersion) return this.#entry(block.hash, own);
+    if (own === block.specVersion) return this.#confirm(await this.#entry(block.hash, own));
     throw new UmbraError(
       "metadata-mismatch",
       `block ${block.height} (${hexOf(block.hash)}) carries spec_version ${block.specVersion} in its MNSV digest, but the ` +
@@ -118,6 +158,12 @@ export class RuntimeMetadata {
   /** The `spec_version`s whose metadata is cached, ascending. */
   specVersions(): number[] {
     return [...this.#cached.keys()].sort((a, b) => a - b);
+  }
+
+  /** `entry`'s version is confirmed: its check passed and its metadata was read. */
+  #confirm(entry: RuntimeMetadataEntry): RuntimeMetadataEntry {
+    this.#confirmed.add(entry.specVersion);
+    return entry;
   }
 
   /** `specVersion`'s metadata, read at `at` — whose runtime has that version — unless read already. */

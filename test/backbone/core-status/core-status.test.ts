@@ -137,8 +137,9 @@ describe("what /status shows besides status()", () => {
     expect(snapshotOf(status({ head: null }), FACTS).status.node?.finalizedHead).toBeNull();
   });
 
-  it("on the core: the best head the node announced last, the connection's state, the queue's depth", () => {
-    const node = { bestHead: 103n, connection: "connected" as const, queueDepth: 2 };
+  it("on the core: the best head the node announced last, the connection's state, the queue's depth, the call counts", () => {
+    const calls = { chain_getBlock: { calls: 2, attempts: 3, frames: 3, failures: {} } };
+    const node = { bestHead: 103n, connection: "connected" as const, queueDepth: 2, calls };
     expect(snapshotOf(status(), { ...FACTS, node }).status.node).toEqual({
       finalizedHead: "9",
       bestHead: "103",
@@ -147,12 +148,17 @@ describe("what /status shows besides status()", () => {
       queueDepth: 2,
       tipCap: 600,
       finalityStall: false,
+      calls,
+      batches: null,
     });
+    // The frames and the batch refusal (FR-019 of the node call budget), as the process reports them.
+    const batches = { frames: 2, refused: true };
+    expect(snapshotOf(status(), { ...FACTS, node: { ...node, batches } }).status.node?.batches).toEqual(batches);
     for (const connection of ["connecting", "connected", "retrying", "closed"] as const) {
       expect(snapshotOf(status(), { ...FACTS, node: { ...node, connection } }).status.node?.connection).toBe(connection);
     }
     // What the process does not know yet: null (a source without a queue, a best head not announced, no client yet).
-    const unknown = { bestHead: null, connection: null, queueDepth: null };
+    const unknown = { bestHead: null, connection: null, queueDepth: null, calls: null };
     expect(snapshotOf(status(), { ...FACTS, node: unknown }).status.node).toMatchObject(unknown);
     expect(snapshotOf(status(), { ...FACTS, node: { ...node, queueDepth: 0 } }).status.node?.queueDepth).toBe(0);
     expect(Object.isFrozen(snapshotOf(status(), { ...FACTS, node }).status.node)).toBe(true);
@@ -162,7 +168,7 @@ describe("what /status shows besides status()", () => {
     const shown = snapshotOf(status({ head: 12n }), { ...FACTS, side: "private", instanceId: "wallet-a" });
     expect(shown.status).toMatchObject({ instance: { role: "private", id: "wallet-a" }, node: null, public: { cursor: "12", lockstep: null } });
     // Whatever the process reports of a node, a private process has none to show: its node fields are null.
-    const reported = { ...FACTS, side: "private" as const, node: { bestHead: 7n, connection: "connected" as const, queueDepth: 1 } };
+    const reported = { ...FACTS, side: "private" as const, node: { bestHead: 7n, connection: "connected" as const, queueDepth: 1, calls: {} } };
     expect(snapshotOf(status(), reported).status.node).toBeNull();
   });
 
@@ -433,7 +439,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
   });
 
   it("asks the process for its node at each snapshot: the best head, the connection's state, the queue's depth (8.3a)", async () => {
-    const node = { bestHead: null as bigint | null, connection: "connecting" as "connecting" | "connected" | "retrying" | "closed", queueDepth: 0 };
+    const node = { bestHead: null as bigint | null, connection: "connecting" as "connecting" | "connected" | "retrying" | "closed", queueDepth: 0, calls: {} };
     let asked = 0;
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => status(), log: () => undefined, start: fake.start, node: () => (asked++, node) });
@@ -509,6 +515,7 @@ describe("for /status: core-status's, from its own folder, its tests beside it",
     const here = readdirSync(fileURLToPath(new URL(".", import.meta.url)));
     expect(here.filter((file) => file.endsWith(".test.ts")).sort()).toEqual([
       "core-status.test.ts",
+      "node-calls.test.ts",
       "node-fields.negative-control.test.ts",
       "node-fields.test.ts",
       "paused.negative-control.test.ts",

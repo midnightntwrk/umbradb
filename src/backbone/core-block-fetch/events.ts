@@ -37,6 +37,13 @@ export const SYSTEM_EVENTS = Object.freeze({ prefix: "System", entry: "Events" }
 export interface BlockEventSource {
   /** The `System::Events` value of `block`'s own state, or null when there is none (see the module comment). */
   blockEvents(block: BlockRef): Promise<Uint8Array | null>;
+  /**
+   * Checks against the node that `block` was built by the runtime of `specVersion`, throwing `metadata-mismatch` when it
+   * was not; `core-chain-events` asks it before it reports that the block's events do not decode. The node source's
+   * metadata cache gives a confirmed version's metadata without asking the node, so a wrong `MNSV` version is found
+   * here. A source without a node (the in-memory one) has none.
+   */
+  checkRuntime?(block: BlockRef, specVersion: number): Promise<void>;
 }
 
 /** Whether `source` gives `core-chain-events` a block's events (the node source, the in-memory source). */

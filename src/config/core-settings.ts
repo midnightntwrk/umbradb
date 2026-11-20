@@ -190,6 +190,12 @@ const BASE = {
     .meta(OPERATIONAL),
   tipCap: count().default(600).meta(OPERATIONAL),
   prefetchWindow: count().default(64).meta(OPERATIONAL),
+  // `core-ledger-state` compares its root with the node's at block 0, at every multiple of this, and at the heights
+  // `src/backbone/core-ledger-state/root-checks.ts` adds; 1 compares every height.
+  ledgerRootInterval: z.number().int().min(1).default(600).meta(OPERATIONAL),
+  // How many prefetched blocks' node calls go in one JSON-RPC batch frame (`src/node/client.ts`, **Batches**); 1 sends
+  // every call in a frame of its own.
+  nodeBatchBlocks: z.number().int().min(1).default(8).meta(OPERATIONAL),
   backoffCeilingMs: count().default(30_000).meta(OPERATIONAL),
   backupAtStop: text().optional().meta(OPERATIONAL),
   // SIGUSR2 writes a backup there at the loop's next pause.

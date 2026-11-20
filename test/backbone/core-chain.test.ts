@@ -132,8 +132,11 @@ describe("core-chain's declaration", () => {
     expect(Object.isFrozen(CORE_CHAIN_MIGRATIONS)).toBe(true);
   });
 
-  it("makes the node client's options from the process's core settings: its node and back-off ceiling, none without a node", () => {
-    expect(nodeOptionsOf({ node: NODE, backoffCeilingMs: 5_000 })).toEqual({ url: NODE, backoffCeilingMs: 5_000 });
+  it("makes the node client's options from the process's core settings: its node, back-off ceiling and batch, none without a node", () => {
+    expect(nodeOptionsOf({ node: NODE, backoffCeilingMs: 5_000 })).toEqual({ url: NODE, backoffCeilingMs: 5_000, batchSize: 1 });
+    // nodeBatchBlocks: room for each block's calls (hash, block, events, root) in one batch; 1 sends none.
+    expect(nodeOptionsOf({ node: NODE, backoffCeilingMs: 5_000, nodeBatchBlocks: 8 })).toEqual({ url: NODE, backoffCeilingMs: 5_000, batchSize: 32 });
+    expect(nodeOptionsOf({ node: NODE, backoffCeilingMs: 5_000, nodeBatchBlocks: 1 })?.batchSize).toBe(1);
     // A private process has no node: it publishes no node client.
     expect(nodeOptionsOf({ instanceId: "p", backoffCeilingMs: 30_000 })).toBeNull();
   });

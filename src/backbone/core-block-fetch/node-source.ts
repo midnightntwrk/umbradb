@@ -10,8 +10,9 @@
  * have been lost. A head header's hash is computed from the header (`./header.ts`), since notifications carry none.
  *
  * **Finality conflicts.** A finalized notification can carry a hash that differs from the finalized hash the source
- * knows at its height: the head's, one read by `chain_getBlockHash`, or, at or below the loop's cursor, the database's
- * (`QueueRunner.storedHash`). That fails the source with `finality-conflict`, because a finalized block never changes.
+ * knows at its height: the head's, a notified head's parent's, one read by `chain_getBlockHash` or taken from a queued
+ * block's parent link, or, at or below the loop's cursor, the database's (`QueueRunner.storedHash`). A notified head's
+ * parent hash, and a hash read or derived for a height, are checked the same way before they are kept. That fails the source with `finality-conflict`, because a finalized block never changes.
  * The failure rejects the loop's next call, so processing halts with that code. Before the loop runs (startup), a
  * notification at or below the cursor is compared only with what the source knows, because the startup checks already
  * compare the cursor's hash with the node's.
@@ -22,9 +23,31 @@
  * - the head the loop last read (`finalizedHead`), so that the head's `on-finalized` comes before any of its heights'
  *   `on-fetch`.
  *
+ * - the last height the loop processes in its run (`QueueRunner.lastHeight`: the core's stop, or the height before an
+ *   upgrade boundary), so nothing is asked of the node for a height the run will not process.
+ *
  * It never fetches or holds more than `prefetchWindow` heights above the cursor, and prepares `concurrency` of them at a
- * time. For each height it reads `chain_getBlockHash` (the finalized hash), then takes the queued block of that hash if
- * there is one, or else runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner (`QueueRunner.prepare`).
+ * time (8, or `nodeBatchBlocks` when more). For each height it takes the finalized hash, then takes the queued block of
+ * that hash if there is one, or else runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner
+ * (`QueueRunner.prepare`).
+ *
+ * **Batches.** The prefetch makes the node calls of several heights at the same time, so that the node client, which
+ * sends the calls made in one turn as one JSON-RPC batch frame (`src/node/client.ts`, **Batches**), sends them in few
+ * frames. While the window's own bound limits it (not the head, nor the run's last height), the prefetch begins new
+ * heights in groups of `nodeBatchBlocks` (`batchBlocks`), not one at a time as the loop passes them: their hashes are
+ * then asked together, and once answered their blocks. A block is asked together with the calls its preparation will
+ * make: its chain events (`state_getStorage`, see below) once this run's `core-chain-events` asked for a block's events,
+ * and its ledger root when the roots' prefetch asks for it (see below). The best-block path asks a block's events with
+ * the block the same way. With `nodeBatchBlocks: 1` every height begins as soon as the window has room, and the client
+ * sends each call in a frame of its own.
+ *
+ * **The finalized hash of a height.** While the loop follows the head (the head no more than `prefetchWindow` above
+ * the cursor), the source takes it without a node call when it knows it: each finalized notification and each head read
+ * gives the head's hash and its parent's (the header's `parentHash`), so with one-step finality every height's hash is
+ * known; after a jump, a height below a known one is derived through the queued best blocks' parent links (the queued
+ * block with the known hash names its parent's). Only a height still unknown is read with `chain_getBlockHash`. During a
+ * catch-up (the head farther above the cursor) every height is read with `chain_getBlockHash`, as before. The hashes
+ * known are kept from the cursor's height up, so they never outgrow the heights between the cursor and the head.
  *
  * The loop takes each prepared height (`prepared`) in order, so every height is still committed in its own
  * transaction. A queued block at the height with another hash is dropped, with everything queued above it
@@ -45,8 +68,8 @@
  * condition `finality-stall`.
  *
  * A best block is queued only while the loop follows the head, that is, while the head is no more than
- * `prefetchWindow` above the cursor. During a catch-up the prefetch serves those heights, and the queue would hold
- * blocks far above the window.
+ * `prefetchWindow` above the cursor, and only at or below the run's last height (`QueueRunner.lastHeight`). During a
+ * catch-up the prefetch serves those heights, and the queue would hold blocks far above the window.
  *
  * When the finalized head rises to a height where the queue holds another hash, the queued blocks from there on are
  * dropped (`on-rollback`). Every queue change, including the prefetch taking a queued block, runs one at a time.
@@ -72,13 +95,20 @@
  *
  * **The items** `core-block-fetch` publishes for a block ({@link NodeBlockSource.blockItems}, `./items.ts`) come from
  * the block fetched, the ledger table (`selectLedgerVersion`), and the metadata of the runtime that built it, its
- * parent's state's or, at a delayed upgrade's first block, its own (`RuntimeMetadata.forBlock`: one
- * `state_getRuntimeVersion` per block, two at that block, one `state_getMetadata` per runtime), which decodes its
- * extrinsics. Every call it makes is one the system is allowed to make.
+ * parent's state's or, at a delayed upgrade's first block, its own (`RuntimeMetadata.forBlock`), which decodes its
+ * extrinsics. The metadata cache lives as long as the source, so `state_getRuntimeVersion` is asked at the first block
+ * of each `MNSV` version the process sees (twice at a delayed upgrade's first block), not at every block, and
+ * `state_getMetadata` once per runtime; the best blocks' cache (no retries) confirms its versions on its own. A block
+ * whose extrinsics do not decode with a confirmed version's cached metadata is checked in full
+ * (`forBlock(…, { check: true })`) before the decode's error is reported, so a wrong `MNSV` still ends in
+ * `metadata-mismatch`; {@link NodeBlockSource.checkRuntime} does the same for `core-chain-events` when a block's events do
+ * not decode. Every call it makes is one the system is allowed to make.
  *
  * **A block's chain events** ({@link NodeBlockSource.blockEvents}, `./events.ts`): `System::Events` read with
  * `state_getStorage` at the block's own hash, for `core-chain-events`, which decodes them. For a queued best block they
- * are read without retries, like its other calls.
+ * are read without retries, like its other calls. Once `core-chain-events` asked for a block's events in a run, each
+ * block fetched after it has its events asked with it (**Batches**), and `on-fetch` takes that answer; a block whose
+ * preparation then does not take them (the module no longer runs) ends this until it asks again.
  *
  * **The ledger's root and genesis state** ({@link NodeBlockSource.ledgerStateRoot}, {@link NodeBlockSource.genesisState},
  * `./ledger-source.ts`): `midnight_ledgerStateRoot` at a finalized block's hash and `system_properties.genesis_state`,
@@ -86,7 +116,11 @@
  * `on-compute`.
  *
  * **The roots' prefetch.** Once `core-ledger-state` has asked for a root in a run, the prefetch also asks for the root of
- * each finalized height it fetches itself (never a queued best block's), in a slot of its own after the block's take.
+ * each finalized height it fetches itself (never a queued best block's) whose root `core-ledger-state` compares by the
+ * height alone (block 0 and the multiples of `ledgerRootInterval`, as it tells the source: `rootsChecked`), together
+ * with the block (**Batches**); the heights fetched before the first ask get theirs then, each in a slot of its own. A
+ * height compared for another reason (a run's first, a ledger or runtime change) is
+ * asked at its `on-compute`, unprefetched; a height not compared is never asked.
  * `on-compute` then finds the answer waiting instead of paying the node's latency in every block. It is the same call,
  * with the same retries, at the same finalized hash, so its answer or its error is the one `on-compute` gets. It is kept
  * until the loop passes the height, so a block applied again (the restart after a refused eviction) asks no second
@@ -131,7 +165,15 @@ export interface NodeSourceOptions {
   readonly prefetchWindow: number;
   /** The queue's bound: the most best blocks queued (`tipCap`, 600 by default). */
   readonly tipCap: number;
-  /** How many heights the prefetch fetches at once; {@link DEFAULT_PREFETCH_CONCURRENCY} unless given. */
+  /**
+   * How many prefetched blocks' calls go to the node in one batch (`nodeBatchBlocks`, see the module comment,
+   * **Batches**): the prefetch begins heights in groups of this many; 1 unless given.
+   */
+  readonly batchBlocks?: number;
+  /**
+   * How many heights the prefetch fetches at once; {@link DEFAULT_PREFETCH_CONCURRENCY}, or `batchBlocks` when more,
+   * unless given.
+   */
   readonly concurrency?: number;
 }
 
@@ -139,6 +181,16 @@ export interface NodeSourceOptions {
 interface QueuedBlock {
   readonly block: BlockRef;
   readonly items: BlockItems;
+}
+
+/** A block being prepared (see `NodeBlockSource.#fetched`). */
+interface Fetched {
+  readonly node: NodeBlock;
+  readonly best: boolean;
+  /** Its events, asked with the block; undefined when they were not. */
+  readonly events: Promise<Uint8Array | null> | undefined;
+  /** Whether `blockEvents` took them. */
+  taken: boolean;
 }
 
 /** A finalized height the prefetch prepares. */
@@ -184,6 +236,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   protected readonly client: NodeClient;
   readonly #window: number;
   readonly #tipCap: number;
+  readonly #batchBlocks: number;
   readonly #concurrency: number;
 
   // ── the finalized head ──────────────────────────────────────────────────────────────────────────────────────────
@@ -193,7 +246,10 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   readonly #early: NodeHeader[] = [];
   readonly #waits = new Set<HeadWait>();
   readonly #subscriptions: NodeSubscription[] = [];
-  /** The finalized hashes read by height (`chain_getBlockHash`) above the cursor, for the finality check. */
+  /**
+   * The finalized hashes known by height from the cursor's up: notified heads and their parents, hashes read
+   * (`chain_getBlockHash`) or derived through queued blocks; for the finality check and the prefetch.
+   */
   readonly #finalized = new Map<bigint, Uint8Array>();
   /**
    * The first failure (a finality conflict, a finalized subscription's error, the close): every later call rejects
@@ -229,8 +285,13 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   #best: bigint | null = null;
   /** The best head the node announced last, whatever the queue did with it (`/status`'s); null before any. */
   #announcedBest: bigint | null = null;
-  /** The blocks being prepared, by hash: what `core-block-fetch`'s `on-fetch` reads, and whether best (no retries). */
-  readonly #fetched = new Map<string, { readonly node: NodeBlock; readonly best: boolean }>();
+  /**
+   * The blocks being prepared, by hash: what `core-block-fetch`'s `on-fetch` reads, whether best (no retries), and the
+   * events asked with the block, if any, for `core-chain-events`' `on-fetch` (`blockEvents`).
+   */
+  readonly #fetched = new Map<string, Fetched>();
+  /** Whether a block's events were asked for in this run (`blockEvents`): only then are they asked with each block. */
+  #eventsWanted = false;
   /** The ledger roots the prefetch asked for, by hash, until the loop passes their height. */
   readonly #roots = new Map<string, { readonly height: bigint; readonly root: Promise<Uint8Array> }>();
   /** The finalized heights of this run the prefetch fetched itself (not taken from the queue): those whose root it may ask. */
@@ -239,6 +300,10 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   #rootsWanted = false;
   /** Aborts the roots' calls of this run when it ends. */
   #rootsAbort = new AbortController();
+  /** The heights whose roots the prefetch may ask for: every one until `core-ledger-state` says (`rootsChecked`). */
+  #rootPrefetched: (height: bigint) => boolean = () => true;
+  /** The last height whose root `core-ledger-state` compared and found matching (`rootMatched`); null before any. */
+  #lastRootMatch: bigint | null = null;
 
   // ── the metadata ────────────────────────────────────────────────────────────────────────────────────────────────
   readonly #metadata: RuntimeMetadata;
@@ -249,7 +314,9 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     this.client = options.client;
     this.#window = positive(options.prefetchWindow, "prefetchWindow");
     this.#tipCap = positive(options.tipCap, "tipCap");
-    this.#concurrency = positive(options.concurrency ?? DEFAULT_PREFETCH_CONCURRENCY, "concurrency");
+    this.#batchBlocks = positive(options.batchBlocks ?? 1, "batchBlocks");
+    const concurrency = options.concurrency ?? Math.max(DEFAULT_PREFETCH_CONCURRENCY, this.#batchBlocks);
+    this.#concurrency = positive(concurrency, "concurrency");
     const client = options.client;
     this.#metadata = new RuntimeMetadata(client);
     this.#bestMetadata = new RuntimeMetadata({
@@ -357,7 +424,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   }
 
   nodeView(): SourceNodeView {
-    return Object.freeze({ bestHead: this.#announcedBest, queueDepth: this.#queue.length });
+    return Object.freeze({ bestHead: this.#announcedBest, queueDepth: this.#queue.length, lastRootMatch: this.#lastRootMatch });
   }
 
   conditions(): readonly SourceCondition[] {
@@ -390,9 +457,17 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     }
     const { specVersion, ledger } = selectLedgerVersion(table, { height: block.height, hash: block.hash, digest: header.digest });
     const metadata = await this.metadataOf({ ...block, specVersion }, best);
-    const view = this.#view(metadata.metadata, block.height);
-    const extrinsics = decodeExtrinsics(view, node.extrinsics, block.height);
-    const timestampMs = blockTimeOf(view, extrinsics, block.height);
+    let extrinsics: ReturnType<typeof decodeExtrinsics>;
+    let timestampMs: ReturnType<typeof blockTimeOf>;
+    try {
+      const view = this.#view(metadata.metadata, block.height);
+      extrinsics = decodeExtrinsics(view, node.extrinsics, block.height);
+      timestampMs = blockTimeOf(view, extrinsics, block.height);
+    } catch (error) {
+      // Fail closed: the cached metadata may be a confirmed version's that did not build the block (the module comment).
+      await this.metadataOf({ ...block, specVersion }, best, true);
+      throw error;
+    }
     return Object.freeze({
       "block-header": Object.freeze({
         height: block.height,
@@ -415,8 +490,14 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
    * (`./events.ts`). A best block's are read without retries. Null when the state holds no value there.
    */
   async blockEvents(block: BlockRef): Promise<Uint8Array | null> {
-    const best = this.#fetched.get(hexOf(block.hash))?.best ?? false;
-    return this.client.storage(systemEventsKey(), block.hash, best ? { retry: false } : undefined);
+    const fetched = this.#fetched.get(hexOf(block.hash));
+    // From now on in this run, each block's events are asked with it (see the module comment, **Batches**).
+    if (this.#runner !== undefined) this.#eventsWanted = true;
+    if (fetched?.events !== undefined) {
+      fetched.taken = true;
+      return fetched.events;
+    }
+    return this.client.storage(systemEventsKey(), block.hash, fetched?.best === true ? { retry: false } : undefined);
   }
 
   /**
@@ -426,7 +507,9 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     if (!this.#rootsWanted && this.#runner !== undefined) {
       this.#rootsWanted = true;
       // The heights the prefetch fetched before this first ask, all within the window, get their roots asked now.
-      for (const [height, hash] of this.#fetchedFinalized) if (height > block.height) this.#prefetchRoot(height, hash);
+      for (const [height, hash] of this.#fetchedFinalized) {
+        if (height > block.height && this.#rootPrefetched(height)) this.#prefetchRoot(height, hash);
+      }
     }
     if (this.#runner === undefined) return this.client.ledgerStateRoot(block.hash);
     const key = hexOf(block.hash);
@@ -440,6 +523,26 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     return root;
   }
 
+  /**
+   * Checks in full that `block` was built by the runtime of `specVersion`, its `MNSV` version (`forBlock` with `{ check:
+   * true }`): throws `metadata-mismatch` when it was not. `core-chain-events` asks it before it reports that a block's
+   * events do not decode with the block's `runtime-metadata`. A best block's check is made without retries.
+   */
+  async checkRuntime(block: BlockRef, specVersion: number): Promise<void> {
+    const best = this.#fetched.get(hexOf(block.hash))?.best ?? false;
+    await this.metadataOf({ ...block, specVersion }, best, true);
+  }
+
+  /** Which heights' roots `core-ledger-state` compares by the height alone: the only ones the prefetch asks for. */
+  rootsChecked(checked: (height: bigint) => boolean): void {
+    this.#rootPrefetched = checked;
+  }
+
+  /** `core-ledger-state` compared the root at `height` and it matched: `/status`'s `ledger.lastRootMatch`. */
+  rootMatched(height: bigint): void {
+    if (this.#lastRootMatch === null || height > this.#lastRootMatch) this.#lastRootMatch = height;
+  }
+
   /** The genesis ledger state: `system_properties.genesis_state`, with the client's retries. */
   async genesisState(): Promise<Uint8Array> {
     return genesisStateOf(await this.client.systemProperties());
@@ -448,11 +551,11 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   // ── seams (a negative control's) ────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * The metadata `block`'s content is decoded with: the runtime that built it (`forBlock`). A best block's is
-   * read without retries.
+   * The metadata `block`'s content is decoded with: the runtime that built it (`forBlock`), checked against the node
+   * when `check` is true or its version is not confirmed yet. A best block's is read without retries.
    */
-  protected metadataOf(block: MetadataBlock, best: boolean): Promise<RuntimeMetadataEntry> {
-    return (best ? this.#bestMetadata : this.#metadata).forBlock(block);
+  protected metadataOf(block: MetadataBlock, best: boolean, check = false): Promise<RuntimeMetadataEntry> {
+    return (best ? this.#bestMetadata : this.#metadata).forBlock(block, { check });
   }
 
   /** The last height the prefetch prepares with the loop's cursor at `cursor` and the head at `head`. */
@@ -524,6 +627,8 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     if (head === undefined || block.height > head.height) {
       this.#head = block;
       this.#finalized.set(block.height, block.hash);
+      // The head's parent is finalized too: known, checked like any finalized hash learned (`#learned`).
+      if (block.height > 0n) this.#learned({ height: block.height - 1n, hash: block.parentHash, parentHash: new Uint8Array(0) }, "the parent hash of the finalized head notified above it");
       for (const wait of [...this.#waits]) if (block.height > wait.above) wait.resolve();
       this.#queued((runner) => this.#dropFrom(runner, block)).catch(() => undefined);
       return;
@@ -543,10 +648,59 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     );
   }
 
-  #conflict(block: BlockRef, known: Uint8Array, what: string): UmbraError {
+  /**
+   * A finalized hash learned for a height other than by its notification (a head's parent, a read, a derivation): kept
+   * from the cursor's height up, checked against the hash known there, or, at or below the cursor, the database's.
+   * A difference fails the source with `finality-conflict`.
+   */
+  #learned(block: BlockRef, what: string): void {
+    const known = this.#finalized.get(block.height);
+    if (known !== undefined) {
+      if (!sameBytes(known, block.hash)) this.#fail(this.#conflict(block, known, "the finalized hash known there", what));
+      return;
+    }
+    const cursor = this.#cursor;
+    const runner = this.#runner;
+    if (cursor === null || block.height >= cursor) this.#finalized.set(block.height, block.hash);
+    if (runner === undefined || cursor === null || block.height > cursor) return;
+    runner.storedHash(block.height).then(
+      (stored) => {
+        if (stored !== null && !sameBytes(stored, block.hash)) this.#fail(this.#conflict(block, stored, "the database's block", what));
+      },
+      () => undefined,
+    );
+  }
+
+  /**
+   * The finalized hash of `height` without a node call (see the module comment), while the loop follows the head:
+   * known, or derived from the nearest known hash above it through the queued blocks' parent links; else undefined.
+   */
+  #knownFinalized(height: bigint): Uint8Array | undefined {
+    const head = this.#head;
+    const cursor = this.#cursor;
+    if (head === undefined || cursor === null || head.height - cursor > BigInt(this.#window)) return undefined;
+    const known = this.#finalized.get(height);
+    if (known !== undefined) return known;
+    let above = height + 1n;
+    while (above <= head.height && !this.#finalized.has(above)) above += 1n;
+    const top = this.#finalized.get(above);
+    if (top === undefined) return undefined;
+    let hash: Uint8Array = top;
+    for (let at = above; at > height; at--) {
+      const step: Uint8Array = hash;
+      const queued: QueuedBlock | undefined = this.#queue.find((entry) => entry.block.height === at && sameBytes(entry.block.hash, step));
+      if (queued === undefined) return undefined;
+      hash = queued.block.parentHash;
+      this.#learned({ height: at - 1n, hash, parentHash: new Uint8Array(0) }, "the parent hash of a queued block with the finalized hash above it");
+    }
+    return this.#failure === undefined ? hash : undefined;
+  }
+
+  #conflict(block: BlockRef, known: Uint8Array, what: string, learned?: string): UmbraError {
     return new UmbraError(
       "finality-conflict",
-      `the node reported the finalized block ${hexOf(block.hash)} at height ${block.height}, but ${what} is ` +
+      `the node reported the finalized block ${hexOf(block.hash)} at height ${block.height}` +
+        `${learned === undefined ? "" : ` (${learned})`}, but ${what} is ` +
         `${hexOf(known)}: a finalized block never changes; processing halts`,
       { height: block.height, hash: hexOf(block.hash), stored: hexOf(known) },
     );
@@ -583,6 +737,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     this.#roots.clear();
     this.#fetchedFinalized.clear();
     this.#rootsWanted = false;
+    this.#eventsWanted = false;
     this.#lastTake = Promise.resolve();
     this.#queue = [];
     this.#best = null;
@@ -593,8 +748,16 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   #fill(): void {
     const announced = this.#announced;
     if (this.#runner === undefined || this.#cursor === null || announced === null || this.#failure !== undefined) return;
-    const end = this.windowEnd(this.#cursor, announced);
-    for (let height = this.#cursor + 1n; height <= end; height++) if (!this.#prefetch.has(height)) this.#begin(height);
+    const last = this.#runner.lastHeight ?? null;
+    const window = this.windowEnd(this.#cursor, announced);
+    const end = last !== null && last < window ? last : window;
+    let next = this.#cursor + 1n;
+    while (next <= end && this.#prefetch.has(next)) next += 1n;
+    // While the window's own bound limits it, heights begin in groups of `nodeBatchBlocks` (the module comment,
+    // **Batches**); a group no larger than the window, so the heights begun always reach past the cursor.
+    const group = BigInt(Math.min(this.#batchBlocks, this.#window));
+    if (end >= this.#cursor + BigInt(this.#window) && end - next + 1n < group) return;
+    for (let height = next; height <= end; height++) if (!this.#prefetch.has(height)) this.#begin(height);
   }
 
   /** Begins preparing the finalized height `height`, once a slot is free. */
@@ -644,13 +807,17 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     let hash: Uint8Array;
     let queued: PreparedBlock | undefined;
     try {
-      hash = await this.#slot(async () => {
-        live();
-        const read = await this.client.blockHash(height);
-        live();
-        return read;
-      });
-      this.#finalized.set(height, hash);
+      const known = this.#knownFinalized(height);
+      hash =
+        known ??
+        (await this.#slot(async () => {
+          live();
+          const read = await this.client.blockHash(height);
+          live();
+          return read;
+        }));
+      if (known === undefined) this.#learned({ height, hash, parentHash: new Uint8Array(0) }, "the finalized hash read there");
+      this.#throwFailure();
       await below;
       queued = await this.#queued((current) => this.#take(current, height, hash), runner);
     } finally {
@@ -659,38 +826,73 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     live();
     if (queued !== undefined) return queued;
     this.#fetchedFinalized.set(height, hash);
-    if (this.#rootsWanted) this.#prefetchRoot(height, hash);
     return this.#slot(async () => {
-      const node = await this.client.block(hash);
+      // The block, its events and its root are asked together (the module comment, **Batches**).
+      if (this.#rootsWanted && this.#rootPrefetched(height)) this.#prefetchRoot(height, hash, false);
+      const { node: fetching, events } = this.#fetchBlock(hash, false);
+      const node = await fetching;
       live();
       this.#checkHeight(node.header, height, "chain_getBlock");
-      return this.#prepare(runner, refOf(node.header, hash), node, false);
+      return this.#prepare(runner, refOf(node.header, hash), node, false, events);
     });
   }
 
-  /** Asks, in a slot, for the ledger root at the finalized `hash` of `height`, for `ledgerStateRoot` to take. */
-  #prefetchRoot(height: bigint, hash: Uint8Array): void {
+  /**
+   * `chain_getBlock` at `hash`, and with it the block's events once this run asked for a block's events (the module
+   * comment, **Batches**); a best block's without retries.
+   */
+  #fetchBlock(
+    hash: Uint8Array,
+    best: boolean,
+  ): { readonly node: Promise<NodeBlock>; readonly events: Promise<Uint8Array | null> | undefined } {
+    const options = best ? { retry: false } : undefined;
+    const node = this.client.block(hash, options);
+    if (!this.#eventsWanted) return { node, events: undefined };
+    const events = this.client.storage(systemEventsKey(), hash, options);
+    // `on-fetch` awaits them when it takes them; a block that fails before leaves them unawaited.
+    events.catch(() => undefined);
+    return { node, events };
+  }
+
+  /**
+   * Asks for the ledger root at the finalized `hash` of `height`, for `ledgerStateRoot` to take: in a slot of its own
+   * when `slotted` (the heights fetched before the run's first ask), else at once, in the slot of the block it is asked
+   * with.
+   */
+  #prefetchRoot(height: bigint, hash: Uint8Array, slotted = true): void {
     const key = hexOf(hash);
     if (this.#roots.has(key)) return;
     const signal = this.#rootsAbort.signal;
-    const root = this.#slot(async () => {
+    const ask = (): Promise<Uint8Array> => {
       // A root queued for a slot by a run that ended is never asked.
       signal.throwIfAborted();
       return this.client.ledgerStateRoot(hash, { signal });
-    });
+    };
+    const root = slotted ? this.#slot(async () => ask()) : ask();
     // `ledgerStateRoot` awaits it when it takes it; a root the loop passed, or a run that ended, leaves it unawaited.
     root.catch(() => undefined);
     this.#roots.set(key, { height, root });
   }
 
-  /** `on-fetch` and `on-parse` for `block`, fetched as `node`, through `runner`. */
-  async #prepare(runner: QueueRunner, block: BlockRef, node: NodeBlock, best: boolean): Promise<PreparedBlock> {
+  /**
+   * `on-fetch` and `on-parse` for `block`, fetched as `node` (with its `events` when they were asked with it), through
+   * `runner`. Events asked and not taken stop the asking with each block until `blockEvents` is asked again.
+   */
+  async #prepare(
+    runner: QueueRunner,
+    block: BlockRef,
+    node: NodeBlock,
+    best: boolean,
+    events?: Promise<Uint8Array | null>,
+  ): Promise<PreparedBlock> {
     const key = hexOf(block.hash);
-    this.#fetched.set(key, { node, best });
+    const fetched: Fetched = { node, best, events, taken: false };
+    this.#fetched.set(key, fetched);
     try {
       return Object.freeze({ block, items: await runner.prepare(block) });
     } finally {
       this.#fetched.delete(key);
+      if (events !== undefined && !fetched.taken) this.#eventsWanted = false;
     }
   }
 
@@ -755,6 +957,9 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     const cursor = this.#cursor;
     const height = header.number;
     if (head === undefined || cursor === null || height <= head.height || height <= cursor) return;
+    // Nothing above the run's last height (the core's stop, or before an upgrade boundary) is fetched.
+    const last = runner.lastHeight ?? null;
+    if (last !== null && height > last) return;
     // Queued only while the loop follows the head, not during a catch-up.
     if (head.height - cursor > BigInt(this.#window)) return;
     if (this.#best === null || height > this.#best) this.#best = height;
@@ -768,10 +973,11 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     const block = refOf(header, hash);
     try {
       await runner.bestBlock(block);
-      const node = await this.client.block(hash, { retry: false });
+      const { node: fetching, events } = this.#fetchBlock(hash, true);
+      const node = await fetching;
       live();
       this.#checkHeight(node.header, height, "chain_getBlock");
-      const prepared = await this.#prepare(runner, block, node, true);
+      const prepared = await this.#prepare(runner, block, node, true, events);
       live();
       await this.#place(runner, { block, items: prepared.items }, live);
     } catch {
@@ -831,9 +1037,10 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     if (dropped.length > 0) await runner.rollback(dropped.map((queued) => queued.block));
     for (const { hash, header } of branch) {
       const ref = refOf(header, hash);
-      const node = await this.client.block(hash, { retry: false });
+      const { node: fetching, events } = this.#fetchBlock(hash, true);
+      const node = await fetching;
       live();
-      const { items } = await this.#prepare(runner, ref, node, true);
+      const { items } = await this.#prepare(runner, ref, node, true, events);
       live();
       this.#queue.push({ block: ref, items });
     }
@@ -859,8 +1066,8 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
 
 /**
  * The node source a process runs with: the runner's `source: (core) => …`, which `umbradb run` passes. It works over the
- * process's node client, with the `core` revision's `prefetchWindow` and `tipCap`. Throws when the process has no node
- * client (its `core` revision has no `node`).
+ * process's node client, with the `core` revision's `prefetchWindow`, `tipCap` and `nodeBatchBlocks`. Throws when the
+ * process has no node client (its `core` revision has no `node`).
  */
 export function nodeSourceOf(
   core: { readonly settings: unknown },
@@ -871,6 +1078,15 @@ export function nodeSourceOf(
       field: "node",
     });
   }
-  const settings = core.settings as { readonly prefetchWindow: number; readonly tipCap: number };
-  return new NodeBlockSource({ client: shared.nodeClient, prefetchWindow: settings.prefetchWindow, tipCap: settings.tipCap });
+  const settings = core.settings as {
+    readonly prefetchWindow: number;
+    readonly tipCap: number;
+    readonly nodeBatchBlocks?: number;
+  };
+  return new NodeBlockSource({
+    client: shared.nodeClient,
+    prefetchWindow: settings.prefetchWindow,
+    tipCap: settings.tipCap,
+    batchBlocks: settings.nodeBatchBlocks ?? 1,
+  });
 }

@@ -18,6 +18,7 @@ import {
   traceDropBlock,
   traceEndBlock,
   traceMark,
+  traceNode,
   tracePush,
   traceStatement,
   traceSteps,
@@ -42,6 +43,8 @@ import {
   workerTracing,
   type WorkerTraceEntry,
 } from "../../src/trace/worker-trace.js";
+import { NodeClient } from "../../src/node/client.js";
+import { FakeNode } from "../node/fake-node.js";
 import { addingUpProblems, unaccountedMs } from "./worker-time.js";
 
 // The block trace (`src/trace/`): off unless started, and what it hands its sink once started.
@@ -81,6 +84,7 @@ describe("the block trace, not started", () => {
     traceStatement("SELECT 1", 0.5);
     traceChain(["1"]);
     traceWorker({ h: 1 });
+    traceNode("chain_getBlock", "calls");
     traceEndBlock(1n);
     traceDropBlock();
     stopTrace();
@@ -176,6 +180,67 @@ describe("the block trace, started", () => {
     traceEndBlock(5n);
     stopTrace();
     expect(memory.blockLines()).toEqual([expect.objectContaining({ h: 5, applyMs: 1 })]);
+  });
+
+  it("adds the node client's counts since the line before as node, kept when a height is dropped, and starts over", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    traceNode("chain_getBlockHash", "calls");
+    traceNode("chain_getBlockHash", "attempts");
+    traceNode("chain_getBlockHash", "frames");
+    traceNode("chain_getBlockHash", "attempts");
+    traceNode("chain_getBlockHash", "frames");
+    traceNode("chain_getBlock", "calls");
+    traceNode("chain_getBlock", "failures");
+    traceEndBlock(1n);
+    // A height dropped keeps what the client sent meanwhile for the next line.
+    traceNode("chain_getBlock", "calls");
+    traceDropBlock();
+    traceNode("chain_getBlock", "attempts");
+    traceEndBlock(2n);
+    traceEndBlock(3n);
+    stopTrace();
+    const lines = memory.blockLines();
+    expect(lines[0]?.node).toEqual({ chain_getBlockHash: [1, 2, 2, 0], chain_getBlock: [1, 0, 0, 1] });
+    expect(lines[1]?.node).toEqual({ chain_getBlock: [1, 1, 0, 0] });
+    // A line with nothing sent since the one before has no node.
+    expect(lines[2]).not.toHaveProperty("node");
+  });
+
+  it("holds every request a node client counted until the last line: the lines' node summed are the client's calls", async () => {
+    const node = await FakeNode.start();
+    node.on("chain_getBlockHash", (params) => ({ result: `0x${Number(params[0]).toString(16).padStart(64, "0")}` }));
+    node.on("chain_getBlock", () => ({ error: { code: -32000, message: "anything else" } }));
+    const client = new NodeClient({ url: node.url() });
+    const memory = memorySink();
+    try {
+      startTrace(memory.sink);
+      await client.blockHash(1n);
+      await client.blockHash(2n);
+      traceEndBlock(1n);
+      await expect(client.block(new Uint8Array(32))).rejects.toMatchObject({ code: "node-error" });
+      traceDropBlock();
+      await client.blockHash(3n);
+      traceEndBlock(2n);
+      stopTrace();
+    } finally {
+      await client.close();
+      await node.stop();
+    }
+    const summed: Record<string, number[]> = {};
+    for (const line of memory.blockLines()) {
+      for (const [method, counts] of Object.entries((line.node ?? {}) as Record<string, number[]>)) {
+        summed[method] = (summed[method] ?? [0, 0, 0, 0]).map((n, i) => n + (counts[i] as number));
+      }
+    }
+    const shown = Object.fromEntries(
+      Object.entries(client.calls).map(([method, c]) => [
+        method,
+        [c.calls, c.attempts, c.frames, Object.values(c.failures).reduce((a, b) => a + b, 0)],
+      ]),
+    );
+    expect(summed).toEqual(shown);
+    expect(shown).toEqual({ chain_getBlockHash: [3, 3, 3, 0], chain_getBlock: [1, 1, 1, 1] });
   });
 
   it("counts each statement under its text, whitespace collapsed and cut, and in its height", () => {

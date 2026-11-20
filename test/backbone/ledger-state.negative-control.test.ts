@@ -20,6 +20,8 @@ import { type LedgerScenario, ledgerScenario, recordedGenesis } from "./ledger-t
  *   `root-mismatch` and the every-root-checked oracle fails.
  * - Block 0 taken in the wrong case gives another root than the node's: applied to a genesis state that already holds
  *   it, or a genesis state taken as it is when it does not. That is a halt at 0, and the block-0 root check fails.
+ * Each runs with `ledgerRootInterval: 1`, every height's root compared, as the criteria were written (the interval's
+ * own checks are in `ledger-root-interval.test.ts`).
  */
 
 const LOADER = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);
@@ -30,6 +32,7 @@ async function run(db: ProcessDatabase, scenario: LedgerScenario, ledger: Module
   const process = await ingest(db, scenario.records, {
     start: 0n,
     core: core(ledger),
+    settings: { ledgerRootInterval: 1 },
     ...(ledgerWorker === undefined ? {} : { ledgerWorker }),
   });
   let status;

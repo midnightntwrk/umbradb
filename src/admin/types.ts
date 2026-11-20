@@ -14,6 +14,7 @@
 
 import type { PlainData, PlainObject } from "../config/plain-data.js";
 import type { NodeConnection } from "../node/client.js";
+import type { NodeCallCounts } from "../node/counts.js";
 import type { ProcessState } from "../runner/process.js";
 
 /**
@@ -65,6 +66,23 @@ export interface NodeStatus {
   readonly tipCap: number;
   /** Whether the condition `finality-stall` is raised. */
   readonly finalityStall: boolean;
+  /**
+   * The node client's counts since the process made it, per method used: calls, tries sent, frames and failed calls by
+   * code (`src/node/counts.ts`); null before the process made its client.
+   */
+  readonly calls: NodeCallCounts | null;
+  /**
+   * The node client's request frames and batches (FR-019 of the node call budget): the frames sent since the process
+   * made it, a batch frame once whatever it carried, and whether the node refused a batch on the current connection, so
+   * that its calls go one per frame until the next; null before the process made its client.
+   */
+  readonly batches: NodeBatches | null;
+}
+
+/** {@link NodeStatus.batches}. */
+export interface NodeBatches {
+  readonly frames: number;
+  readonly refused: boolean;
 }
 
 /** One table of a module, with its row of `core_digest.tables`: its last-changed height and digest. */
@@ -121,6 +139,12 @@ export interface PrivateInstanceStatus {
   readonly height: string | null;
 }
 
+/** What `/status` shows of the ledger (see {@link StatusSnapshot.ledger}). */
+export interface LedgerStatus {
+  /** The last height whose root matched the node's, as decimal text. */
+  readonly lastRootMatch: string;
+}
+
 /** `status()` as the admin endpoints show it (see the module comment): `/status` without its uptime. */
 export interface StatusSnapshot {
   readonly state: ProcessState;
@@ -145,8 +169,11 @@ export interface StatusSnapshot {
   readonly node: NodeStatus | null;
   /** Every part of the database, in startup order; null until startup resolved them. */
   readonly modules: readonly ModuleStatus[] | null;
-  /** The ledger version in effect, its package and its last root check: null, since nothing reports it yet. */
-  readonly ledger: null;
+  /**
+   * The ledger's last root check: the last height whose ledger state root `core-ledger-state` compared with the node's
+   * and found matching in this process; null before any, without `core-ledger-state`, and on a private process.
+   */
+  readonly ledger: LedgerStatus | null;
   /**
    * On the core, its private instances: every listed instance, connected or not, and every other connected one. Null
    * on a private process, and on the core until startup has opened its database.

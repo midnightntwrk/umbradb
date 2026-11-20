@@ -24,7 +24,8 @@ import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
  *   tape's first block + 1, commit every height across their delayed upgrade (F = 3,346,139 and 3,348,434), and F's
  *   chain events decode with the new runtime's metadata. Startup asks for the genesis hash and header, which a
  *   mid-chain tape does not hold: they come from `test/ledger/fixtures/networks/<network>.json`, the node's own answers.
- * - The runtime versions the process asked for are each processed block's parent's, and F's own once.
+ * - The process asks the runtime version at the first block of each version only (the node call budget), not at every
+ *   block: at most twice per version, at blocks of the run.
  * - **Negative controls**: the parent-only selection (the rule before delayed upgrades) halts at F on each tape.
  */
 
@@ -112,9 +113,16 @@ async function replay(backend: ProcessBackend, found: FoundTape, delayed: Delaye
   const run = await ingest(db, records, { start: BigInt(delayed.start), stop: BigInt(last), core, settings: { network: delayed.network } });
   try {
     await committed(run, BigInt(last), WALK_MS);
-    // Each processed block's parent's runtime (block 0: its own), and F's own once.
-    const parents = Array.from({ length: last - delayed.start + 1 }, (_, i) => delayed.start + i).map((h) => hashAt(records, Math.max(0, h - 1)));
-    expect(runtimeReads(run)).toEqual([...parents, hashAt(records, delayed.f)].sort());
+    // The runtime is asked at the first block of each version the run meets (node call budget, FR-001/FR-002): the
+    // start's parent's (block 0: its own), then where each new version begins, at most twice per version (the
+    // delayed upgrade's F asks its parent's state, then its own). Which block of a new version asks first depends on
+    // the prefetch's order, so the reads are bounded, not listed: never one per block.
+    const reads = runtimeReads(run);
+    const versions = new Set(((found.tape.notes as { readonly runtimes?: readonly { readonly specVersion: number }[] }).runtimes ?? []).map((r) => r.specVersion));
+    expect(reads).toContain(hashAt(records, Math.max(0, delayed.start - 1)));
+    expect(reads.length).toBeLessThanOrEqual(2 * versions.size);
+    const inRange = new Set(Array.from({ length: last - delayed.start + 2 }, (_, i) => hashAt(records, Math.max(0, delayed.start - 1 + i))));
+    for (const read of reads) expect(inRange.has(read), `${read} is a block of the run or the start's parent`).toBe(true);
   } finally {
     await run.close();
   }

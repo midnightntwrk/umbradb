@@ -10,6 +10,7 @@
 
 export * from "./backoff.js";
 export * from "./client.js";
+export * from "./counts.js";
 export type { NodeBlock, NodeHeader, NodeRuntimeVersion } from "./decode.js";
 export * from "./errors.js";
 export * from "./methods.js";

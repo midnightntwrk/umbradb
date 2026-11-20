@@ -11,7 +11,9 @@ import { WebSocket, WebSocketServer } from "ws";
  * - answers each method with a handler the test sets, by default the real answers of `fixtures/mainnet-answers.json`;
  * - runs Substrate-style head subscriptions (`chain_newHead`, `chain_finalizedHead` notifications);
  * - can refuse the WebSocket handshake with an HTTP status, stay silent, drop every connection, send frames that are
- *   not JSON-RPC, and stop answering pings.
+ *   not JSON-RPC, and stop answering pings;
+ * - answers a JSON-RPC batch frame with one array of its requests' answers (a silent one left out, none at all sending
+ *   nothing), in their order or reversed, or refuses batches with one −32600 whose id is null, or answers none.
  */
 
 /** One request a fake node received. */
@@ -21,6 +23,8 @@ export interface Received {
   readonly id: unknown;
   /** Which connection of this node it came on, counting from 1. */
   readonly connection: number;
+  /** The batch frame it came in, counting this node's batch frames from 1; absent for a frame of its own. */
+  readonly batch?: number;
 }
 
 /** What a handler answers: a result, a JSON-RPC error, nothing at all, or a raw frame. */
@@ -105,6 +109,15 @@ export class FakeNode {
   refuse: ((upgrade: number) => number | undefined) | undefined;
   /** When set, what the node does on a new connection, before anything else (for example close it at once). */
   onConnection: ((socket: WebSocket) => void) | undefined;
+  /**
+   * What the node does with a batch frame: answer it (one array), refuse it (one −32600 with a null id, as a node that
+   * takes no batches), or answer nothing. A refused or unanswered batch's requests are still recorded.
+   */
+  batches: "answer" | "refuse" | "silent" = "answer";
+  /** Whether a batch's answers are sent in the reverse of the requests' order. */
+  reverseBatches = false;
+  /** The batch frames received. */
+  batchFrames = 0;
 
   readonly #server: Server;
   readonly #wss: WebSocketServer;
@@ -221,18 +234,37 @@ export class FakeNode {
   }
 
   #request(socket: WebSocket, connection: number, text: string): void {
-    const message = JSON.parse(text) as { id: unknown; method: string; params: unknown };
-    const request: Received = { method: message.method, params: message.params, id: message.id, connection };
-    this.received.push(request);
-    RECEIVED_BY_ANY_NODE.push(request);
-    const params = Array.isArray(message.params) ? (message.params as unknown[]) : [];
-    const answer = this.#answer(socket, params, request);
+    const parsed = JSON.parse(text) as unknown;
+    if (Array.isArray(parsed)) {
+      this.batchFrames += 1;
+      const batch = this.batchFrames;
+      const answers = (parsed as { id: unknown; method: string; params: unknown }[]).flatMap((message) => {
+        const answer = this.#one(socket, { method: message.method, params: message.params, id: message.id, connection, batch });
+        return "silent" in answer || "raw" in answer ? [] : [{ jsonrpc: "2.0", id: message.id, ...answer }];
+      });
+      if (this.batches === "refuse") {
+        socket.send(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } }));
+      } else if (this.batches === "answer" && answers.length > 0) {
+        socket.send(JSON.stringify(this.reverseBatches ? answers.reverse() : answers));
+      }
+      return;
+    }
+    const message = parsed as { id: unknown; method: string; params: unknown };
+    const answer = this.#one(socket, { method: message.method, params: message.params, id: message.id, connection });
     if ("silent" in answer) return;
     if ("raw" in answer) {
       socket.send(answer.raw);
       return;
     }
     socket.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, ...answer }));
+  }
+
+  /** Records one request and finds its answer. */
+  #one(socket: WebSocket, request: Received): Answer {
+    this.received.push(request);
+    RECEIVED_BY_ANY_NODE.push(request);
+    const params = Array.isArray(request.params) ? (request.params as unknown[]) : [];
+    return this.#answer(socket, params, request);
   }
 
   #answer(socket: WebSocket, params: readonly unknown[], request: Received): Answer {

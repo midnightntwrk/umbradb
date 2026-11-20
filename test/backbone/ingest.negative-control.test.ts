@@ -147,7 +147,8 @@ describe.each(PROCESS_BACKENDS)("the negative controls on $name", (backend: Proc
     const B = branchOf(b100, 104n, "b");
     const records: TapeRecord[] = [
       ...opening(head[0] as ChainBlock, b100),
-      ...finalized(b100, RUNTIME, true),
+      // 100 is the head read: its hash known, only its content asked (FR-011).
+      ...content(b100, RUNTIME, true),
       ...[...A, ...B].flatMap((block, index) => [newHead(block), ...content(block, RUNTIME, index === 0)]),
       finalizedHead(B[0] as ChainBlock),
       { method: "chain_getBlockHash", params: [101], result: (B[0] as ChainBlock).hex },
