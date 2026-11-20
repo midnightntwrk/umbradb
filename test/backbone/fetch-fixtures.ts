@@ -365,15 +365,20 @@ export function headRead(block: ChainBlock): TapeRecord[] {
 }
 
 /**
- * The calls of `block`'s content: `chain_getBlock`, the runtime version at its parent's state (block 0: its own) and,
- * when `metadata`, that runtime's metadata there.
+ * The calls of `block`'s content: `chain_getBlock` and, when `metadata` (the first block of its runtime the source's
+ * cache sees), the runtime version at its parent's state (block 0: its own) and that runtime's metadata there. Later
+ * blocks of a runtime the cache confirmed ask neither (`src/ledger/metadata.ts`, "Confirmed versions").
  */
 export function content(block: ChainBlock, runtime: Runtime, metadata: boolean): TapeRecord[] {
   const at = block.height === 0n ? block.hex : hex(block.parentHash);
   return [
     { method: "chain_getBlock", params: [block.hex], result: block.block },
-    { method: "state_getRuntimeVersion", params: [at], result: runtimeVersion(runtime.specVersion) },
-    ...(metadata ? [{ method: "state_getMetadata", params: [at], result: hex(runtime.metadata) }] : []),
+    ...(metadata
+      ? [
+          { method: "state_getRuntimeVersion", params: [at], result: runtimeVersion(runtime.specVersion) },
+          { method: "state_getMetadata", params: [at], result: hex(runtime.metadata) },
+        ]
+      : []),
   ];
 }
 

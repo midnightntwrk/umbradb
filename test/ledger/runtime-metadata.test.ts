@@ -79,15 +79,14 @@ describe("on the synthetic devnet upgrade tape", { timeout: TIMEOUT_MS }, () => 
   it("decodes U with the old metadata and F with the new, from genesis and from a cold cache at U", async () => {
     await withNode(upgradeTape(), async (client, node) => {
       await expectUpgradeDecoding(walkOver(client), () => new RuntimeMetadata(client));
-      // Each walk read the runtime at every block's parent (block 0: at block 0), and the metadata once per runtime:
-      // from genesis at block 0 and at U; from U at U − 1 and at U.
+      // Each walk read the metadata once per runtime: from genesis at block 0 and at U; from U at U − 1 and at U.
       const metadataReads = node.calls.filter((call) => call.method === "state_getMetadata").map((call) => call.params);
       expect(metadataReads).toEqual([[toHex(hashOf(0))], [toHex(hashOf(UPGRADE.u))], [toHex(hashOf(UPGRADE.u - 1))], [toHex(hashOf(UPGRADE.u))]]);
       const runtimeReads = node.calls.filter((call) => call.method === "state_getRuntimeVersion").map((call) => call.params);
-      expect(runtimeReads).toEqual([
-        ...[0, 0, 1, 2, 3, 4].map((h) => [toHex(hashOf(h))]),
-        ...[2, 3, 4].map((h) => [toHex(hashOf(h))]),
-      ]);
+      // The runtime only at the first block of each version, at its parent's state (block 0: its own): from genesis
+      // block 0's (at 0) and F's (at U); from U, U's (at U − 1) and F's (at U). The blocks between take the confirmed
+      // version's cached metadata.
+      expect(runtimeReads).toEqual([0, UPGRADE.u, UPGRADE.u - 1, UPGRADE.u].map((h) => [toHex(hashOf(h))]));
     });
   });
 
@@ -144,12 +143,10 @@ describe("a delayed runtime upgrade on the synthetic tape (runtime 2.1's system_
       // The metadata read once per runtime: from genesis at block 0 and at F; from U at U − 1 and at F.
       const metadataReads = node.calls.filter((call) => call.method === "state_getMetadata").map((call) => call.params);
       expect(metadataReads).toEqual([[toHex(hashOf(0))], [toHex(hashOf(UPGRADE.f))], [toHex(hashOf(UPGRADE.u - 1))], [toHex(hashOf(UPGRADE.f))]]);
-      // The runtime read at every block's parent (block 0: its own), and at F's own hash after its parent's.
+      // The runtime read at the first block of each version: block 0 at its own hash; F at its parent's (U, still the
+      // old runtime), then at its own; from U, U at U − 1, then F's two. U itself, an old-version block, asks nothing.
       const runtimeReads = node.calls.filter((call) => call.method === "state_getRuntimeVersion").map((call) => call.params);
-      expect(runtimeReads).toEqual([
-        ...[0, 0, 1, 2, 3, 4, 4].map((h) => [toHex(hashOf(h))]),
-        ...[2, 3, 4, 4].map((h) => [toHex(hashOf(h))]),
-      ]);
+      expect(runtimeReads).toEqual([0, UPGRADE.u, UPGRADE.f, UPGRADE.u - 1, UPGRADE.u, UPGRADE.f].map((h) => [toHex(hashOf(h))]));
     });
   });
 
@@ -212,10 +209,10 @@ describe("on the devnet upgrade tape (skipped by name without the tape)", () => 
         const metadataReads = node.calls.filter((call) => call.method === "state_getMetadata").map((call) => call.params);
         const at = (h: number) => [answers.hashAt(h)];
         expect(metadataReads).toEqual([at(0), at(upgrade.u), at(upgrade.u - 1), at(upgrade.u)]);
-        // The runtime read at every block's parent (block 0: at its own).
+        // The runtime read at the first block of each version only, at its parent's state (block 0: its own): from
+        // genesis at 0 and at U (F's parent); from U at U − 1 and at U. Not at the 234 blocks between.
         const runtimeReads = node.calls.filter((call) => call.method === "state_getRuntimeVersion").map((call) => call.params);
-        const parents = (from: number) => Array.from({ length: upgrade.last - from + 1 }, (_, i) => at(Math.max(0, from + i - 1)));
-        expect(runtimeReads).toEqual([...parents(0), ...parents(upgrade.u)]);
+        expect(runtimeReads).toEqual([at(0), at(upgrade.u), at(upgrade.u - 1), at(upgrade.u)]);
       });
     },
     { timeoutMs: WALK_MS },
@@ -310,13 +307,14 @@ describe("the metadata cache", () => {
     expect(contentStateOf(blockAt(UPGRADE.f))).toEqual(hashOf(UPGRADE.u));
   });
 
-  it("reads each spec_version's metadata once, also for blocks asked for at the same time", async () => {
+  it("reads each spec_version's metadata once and checks it once, also for blocks asked for at the same time", async () => {
     const counting = node();
     const metadata = new RuntimeMetadata(counting);
     const entries = await Promise.all([1, 2, 3, 1, 2].map((h) => metadata.forBlock(blockAt(h))));
     expect(entries.map((entry) => entry.specVersion)).toEqual([UPGRADE.old, UPGRADE.old, UPGRADE.old, UPGRADE.old, UPGRADE.old]);
     expect(counting.calls.filter((call) => call.startsWith("metadata"))).toHaveLength(1);
-    expect(counting.calls.filter((call) => call.startsWith("runtimeVersion"))).toHaveLength(5);
+    // The first block's check; the others waited for it and took the version it confirmed.
+    expect(counting.calls.filter((call) => call.startsWith("runtimeVersion"))).toEqual([`runtimeVersion ${toHex(hashOf(0))}`]);
     // The same bytes for every block of a runtime.
     expect(entries[0]?.metadata).toBe(entries[4]?.metadata);
   });
@@ -344,6 +342,62 @@ describe("the metadata cache", () => {
     await expect(metadata.forBlock({ ...blockAt(1), specVersion: UPGRADE.new })).rejects.toMatchObject({ code: "metadata-mismatch" });
     // The parent's runtime, then the block's own: neither is the block's MNSV version.
     expect(counting.calls).toEqual([`runtimeVersion ${toHex(hashOf(0))}`, `runtimeVersion ${toHex(hashOf(1))}`]);
+  });
+
+  it("asks the runtime once for a run of blocks of one version: the first block confirms it (node call budget, FR-001)", async () => {
+    const counting = node();
+    const metadata = new RuntimeMetadata(counting);
+    for (const h of [0, 1, 2, 3]) expect(await metadata.forBlock(blockAt(h))).toEqual({ specVersion: UPGRADE.old, metadata: METADATA.old });
+    expect(counting.calls).toEqual([`runtimeVersion ${toHex(hashOf(0))}`, `metadata ${toHex(hashOf(0))}`]);
+    // A new version is checked at its first block, at its parent's state (F's parent U runs the new runtime here).
+    expect(await metadata.forBlock(blockAt(UPGRADE.f))).toEqual({ specVersion: UPGRADE.new, metadata: METADATA.new });
+    expect(counting.calls.slice(2)).toEqual([`runtimeVersion ${toHex(hashOf(UPGRADE.u))}`, `metadata ${toHex(hashOf(UPGRADE.u))}`]);
+  });
+
+  it("checks a confirmed version again when asked to ({ check: true }), and finds a block its version did not build", async () => {
+    const counting = node();
+    const metadata = new RuntimeMetadata(counting);
+    await metadata.forBlock(blockAt(1));
+    // F names the old, confirmed version while its parent's state and its own run the new one: without the check the
+    // cache gives the old version's metadata, asking nothing; the check halts it as before the cache.
+    const wrong = { ...blockAt(UPGRADE.f), specVersion: UPGRADE.old };
+    expect(await metadata.forBlock(wrong)).toEqual({ specVersion: UPGRADE.old, metadata: METADATA.old });
+    expect(counting.calls).toHaveLength(2);
+    await expect(metadata.forBlock(wrong, { check: true })).rejects.toMatchObject({
+      code: "metadata-mismatch",
+      details: { height: BigInt(UPGRADE.f), specVersion: UPGRADE.old, runtimeSpecVersion: UPGRADE.new, stateSpecVersion: UPGRADE.new },
+    });
+    // A block its version built passes the check, asked of the node again.
+    expect(await metadata.forBlock(blockAt(2), { check: true })).toEqual({ specVersion: UPGRADE.old, metadata: METADATA.old });
+    expect(counting.calls.slice(2)).toEqual([
+      `runtimeVersion ${toHex(hashOf(UPGRADE.u))}`,
+      `runtimeVersion ${toHex(hashOf(UPGRADE.f))}`,
+      `runtimeVersion ${toHex(hashOf(1))}`,
+    ]);
+  });
+
+  it("confirms nothing on a check that fails: blocks waiting for it make their own", async () => {
+    let failures = 1;
+    const flaky = new CountingNode(
+      () => {
+        if (failures-- > 0) throw new Error("the node did not answer");
+        return UPGRADE.old;
+      },
+      () => METADATA.old,
+    );
+    const metadata = new RuntimeMetadata(flaky);
+    const [first, second, third] = await Promise.allSettled([1, 2, 3].map((h) => metadata.forBlock(blockAt(h))));
+    expect(first).toMatchObject({ status: "rejected", reason: { message: "the node did not answer" } });
+    // 2 and 3 waited for 1's check, then 2 made its own, and 3 waited for 2's.
+    expect(second).toMatchObject({ status: "fulfilled", value: { specVersion: UPGRADE.old } });
+    expect(third).toMatchObject({ status: "fulfilled", value: { specVersion: UPGRADE.old } });
+    expect(flaky.calls.filter((call) => call.startsWith("runtimeVersion"))).toHaveLength(2);
+    // A mismatch confirms nothing either: the version it named is checked again at the next block.
+    const counting = node();
+    const mismatching = new RuntimeMetadata(counting);
+    await expect(mismatching.forBlock({ ...blockAt(1), specVersion: UPGRADE.new })).rejects.toMatchObject({ code: "metadata-mismatch" });
+    expect(await mismatching.forBlock(blockAt(UPGRADE.f))).toEqual({ specVersion: UPGRADE.new, metadata: METADATA.new });
+    expect(counting.calls.filter((call) => call.startsWith("runtimeVersion"))).toHaveLength(3);
   });
 
   it("gives frozen entries", async () => {

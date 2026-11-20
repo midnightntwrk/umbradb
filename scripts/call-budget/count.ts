@@ -6,7 +6,7 @@
  *
  *     UMBRADB_TAPES=<tapes directory> node --import tsx scripts/call-budget/count.ts \
  *       --tape <name> [--start <height>] [--stop <height>] [--head <height>] [--ledger on|off] \
- *       [--settings <JSON>] [--json <file>]
+ *       [--settings <JSON>] [--json <file>] [--compare <JSON report>]
  *
  * - `--tape`: a tape of `test/tape/real/manifest.json`, found in `UMBRADB_TAPES` under its file name, its size and
  *   SHA-256 checked.
@@ -39,6 +39,13 @@
  * (`NodeClient.calls`, `src/node/counts.ts`, what `/status` shows as `node.calls`) once the run stopped, and prints
  * whether each method's attempts equal the requests the tape node logged for it.
  *
+ * **What it stored.** After the process stopped, the script opens its PGlite database and takes every module table
+ * (not PostgreSQL's own, `information_schema`, `public` or change capture's scratch schema) as the MD5 of its rows'
+ * text in order, as the reclamation tests do (`test/backbone/refcount-contents.ts`), and prints one SHA-256 over them
+ * all: the same chain stored the same way gives the same line. The JSON report lists every table's MD5, so two runs
+ * show which table differs; `--compare <JSON report>` prints the tables whose MD5 differs from that report's. A table
+ * that holds wall-clock times differs from run to run.
+ *
  * Exit codes: 0 when the run reached `--stop`; 1 when it did not; 2 for a usage error.
  */
 
@@ -50,6 +57,10 @@ import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-blo
 import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
 import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
+import { createHash } from "node:crypto";
+import { PGlite } from "@electric-sql/pglite";
+import { SHADOW_SCHEMA } from "../../src/db/change-capture.js";
+import { PGLITE_START_PARAMS } from "../../src/db/pglite.js";
 import { NodeClient } from "../../src/node/client.js";
 import { readTape, type TapeCall, type TapeRecord, tapeId } from "../../tools/tape/index.js";
 import { bigintText, committed, ingest } from "../../test/backbone/ingest-harness.js";
@@ -58,7 +69,7 @@ import type { FoundTape, RealTape, RealTapeManifest } from "../../test/tape/real
 
 const USAGE =
   "usage: node --import tsx scripts/call-budget/count.ts --tape <name> [--start <h>] [--stop <h>] [--head <h>] " +
-  "[--ledger on|off] [--settings <JSON>] [--json <file>]";
+  "[--ledger on|off] [--settings <JSON>] [--json <file>] [--compare <JSON report>]";
 
 /** A sync of 10,000 blocks on a loaded machine. */
 const PATIENCE_MS = 3 * 3_600_000;
@@ -83,6 +94,7 @@ const { values } = parseArgs({
     ledger: { type: "string" },
     settings: { type: "string" },
     json: { type: "string" },
+    compare: { type: "string" },
   },
   strict: true,
 });
@@ -166,6 +178,29 @@ function blockOf(call: TapeCall): bigint | null {
     if (known !== undefined) return known;
   }
   return null;
+}
+
+/** Every module table (see the module comment), a partition counted with its table, by name. */
+const MODULE_TABLES_SQL = `SELECT n.nspname AS s, c.relname AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND left(n.nspname, 3) <> 'pg_'
+    AND n.nspname NOT IN ('information_schema', 'public', '${SHADOW_SCHEMA}')
+  ORDER BY 1, 2`;
+
+/** Each module table of the PGlite database at `dataDir` as the MD5 of its rows' text in order, by `schema.table`. */
+async function storedTables(dataDir: string): Promise<Record<string, string>> {
+  const engine = await PGlite.create(dataDir, { startParams: [...PGLITE_START_PARAMS] });
+  try {
+    const digests: Record<string, string> = {};
+    for (const { s, t } of (await engine.query<{ s: string; t: string }>(MODULE_TABLES_SQL)).rows) {
+      const { rows } = await engine.query<{ d: string }>(
+        `SELECT md5(coalesce(string_agg(r::text, ',' ORDER BY r::text), '')) AS d FROM "${s}"."${t}" r`,
+      );
+      digests[`${s}.${t}`] = rows[0]?.d ?? "";
+    }
+    return digests;
+  } finally {
+    await engine.close();
+  }
 }
 
 const core: ModuleDeclaration[] = ledger ? [...LEDGER_CORE] : [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS];
@@ -269,6 +304,21 @@ try {
     `Node client's counts: ${sumOf("calls")} calls, ${sumOf("attempts")} attempts, ${sumOf("frames")} frames, ` +
       `${failures} failed; attempts ${differ.length === 0 ? "equal the tape node's log for every method" : `differ from the log for ${differ.join(", ")}`}`,
   );
+  const stored = await storedTables(db.setting.path);
+  const fingerprint = createHash("sha256")
+    .update(Object.entries(stored).map(([table, md5]) => `${table} ${md5}`).join("\n"))
+    .digest("hex");
+  out.push(`Stored: ${Object.keys(stored).length} module tables, SHA-256 over their MD5s ${fingerprint}`);
+  if (values.compare !== undefined) {
+    const before = (JSON.parse(readFileSync(values.compare, "utf8")) as { stored?: Record<string, string> }).stored ?? {};
+    const tables = [...new Set([...Object.keys(before), ...Object.keys(stored)])].sort();
+    const differ = tables.filter((table) => before[table] !== stored[table]);
+    out.push(
+      differ.length === 0
+        ? `Stored tables equal ${values.compare}'s (${tables.length} tables)`
+        : `Stored tables that differ from ${values.compare}'s: ${differ.join(", ")} (of ${tables.length})`,
+    );
+  }
   process.stdout.write(`${out.join("\n")}\n`);
 
   if (values.json !== undefined) {
@@ -287,6 +337,8 @@ try {
       methods: Object.fromEntries(sorted),
       outcomes: Object.fromEntries(outcomes),
       client: counted,
+      stored,
+      fingerprint,
     };
     writeFileSync(values.json, `${JSON.stringify(report, null, 2)}\n`);
   }

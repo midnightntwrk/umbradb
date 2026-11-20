@@ -149,6 +149,14 @@ On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` w
   starts. Null only for the moment before the process makes its client. A provider that bills per request counts the
   attempts; the requests per block are `attempts` over the heights committed.
 
+What a finalized height asks of the node: `chain_getBlockHash` and `chain_getBlock`, and `state_getStorage` (its
+`System::Events`) with `core-chain-events`. The runtime that built a block is named in its header (its `MNSV` digest),
+so `state_getRuntimeVersion` is asked only at the first block of each runtime version the process sees (twice at a
+delayed upgrade's first block: its parent's state, then its own) and `state_getMetadata` once per runtime; the later
+blocks of a version are decoded with its cached metadata. A block whose extrinsics or events do not decode with that
+metadata is checked against the node in full before the error is reported, so a block that was not built by the runtime
+its header names still halts with `metadata-mismatch`.
+
 A private process has no node: its `node` is null. The process publishes what `/status` shows at least once a second,
 and at once when the connection's state changes.
 

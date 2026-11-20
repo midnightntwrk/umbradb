@@ -106,10 +106,19 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
   afterAll(() => backend.stop(), 60_000);
 
   const chain = chainOf(4n);
+  /**
+   * The chain of the runtime case: height 3 is the first block of another runtime (2_001_100, also v9 on preprod), so
+   * its runtime is read at its parent's state, while 2's version was confirmed at 1 (`src/ledger/metadata.ts`).
+   */
+  const upgraded = chainOf(4n, (h) => (h >= 3n ? { specVersion: 2_001_100 } : {}));
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
+  /** Block `height` of the chain the case `failing` runs on. */
+  const on = (failing: "events" | "runtime" | "block") => (height: number): ChainBlock =>
+    (failing === "runtime" ? upgraded : chain)[height] as ChainBlock;
 
   /** The first two finalized heights, then height 3's records up to the one `failing` answers in its place. */
   function a84Tape(failing: "events" | "runtime" | "block"): TapeRecord[] {
+    const at = on(failing);
     const records: TapeRecord[] = [
       ...opening(at(0), at(3)),
       ...finalized(at(1), RUNTIME_2_0, true),
@@ -136,9 +145,9 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
   /** The request of `failing`, as the tape node logs its method and params. */
   const failingCall = (failing: "events" | "runtime" | "block"): { readonly method: string; readonly params: unknown } =>
     failing === "events"
-      ? { method: "state_getStorage", params: [SYSTEM_EVENTS_STORAGE, at(3).hex] }
+      ? { method: "state_getStorage", params: [SYSTEM_EVENTS_STORAGE, on(failing)(3).hex] }
       : failing === "runtime"
-        ? { method: "state_getRuntimeVersion", params: [at(2).hex] }
+        ? { method: "state_getRuntimeVersion", params: [on(failing)(2).hex] }
         : { method: "chain_getBlockHash", params: [3] };
 
   async function a84Run(failing: "events" | "runtime" | "block", client?: (client: NodeClient) => NodeClient): Promise<A84Observation> {

@@ -10,6 +10,7 @@ import {
   writeEventRows,
 } from "../../src/backbone/core-chain-events/core-chain-events.js";
 import { type ChainEvent, decodeChainEvents } from "../../src/backbone/core-chain-events/events.js";
+import { UmbraError } from "../../src/db/errors.js";
 import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
 import { canonicalJson, MAX_DEPTH, type ScaleValue, ValueReader } from "../../src/backbone/core-chain-events/scale-value.js";
 import {
@@ -484,6 +485,35 @@ describe("core-chain-events' module functions", () => {
     await expect(chainEventsOf(source(eventsValue([])), block({ "runtime-metadata": { specVersion: 1, metadata: "x" } }))).rejects.toThrow(TypeError);
     const events = await chainEventsOf(source(eventsValue([ev.success(0)])), block({ "runtime-metadata": { specVersion: 1, metadata: midnightMetadata(V2_0) } }));
     expect(events.map((e) => e.name)).toEqual(["ExtrinsicSuccess"]);
+  });
+
+  it("checks the block's runtime in full before it reports events that do not decode (FR-003 of the node call budget)", async () => {
+    // Bytes the metadata cannot decode: a sequence of one record whose phase is not a Phase variant.
+    const garbage = Uint8Array.of(...compact(1), 9, 9, 9);
+    const item = { "runtime-metadata": { specVersion: 2_000_000, metadata: midnightMetadata(V2_0) } };
+    const asked: [bigint, number][] = [];
+    const checking = (check: () => Promise<void>): BlockEventSource => ({
+      blockEvents: async () => garbage,
+      checkRuntime: async (b, specVersion) => {
+        asked.push([b.height, specVersion]);
+        await check();
+      },
+    });
+    const mismatch = new UmbraError("metadata-mismatch", "block 7 was not built by 2000000", {});
+    // The check finds the runtime wrong: its metadata-mismatch is what is reported.
+    await expect(chainEventsOf(checking(async () => Promise.reject(mismatch)), block(item))).rejects.toBe(mismatch);
+    // The check finds it right: the decode's own error.
+    const decodeError = await chainEventsOf(checking(async () => undefined), block(item)).catch((error: unknown) => error);
+    expect(decodeError).not.toBeInstanceOf(UmbraError);
+    expect(asked).toEqual([
+      [7n, 2_000_000],
+      [7n, 2_000_000],
+    ]);
+    // A source without the check (the in-memory one): the decode's error, as before.
+    await expect(chainEventsOf(source(garbage), block(item))).rejects.toThrow((decodeError as Error).message);
+    // Events that decode ask for no check.
+    await chainEventsOf({ ...checking(async () => undefined), blockEvents: async () => eventsValue([ev.success(0)]) }, block(item));
+    expect(asked).toHaveLength(2);
   });
 
   it("names the metadata it cannot read, once per metadata array", () => {

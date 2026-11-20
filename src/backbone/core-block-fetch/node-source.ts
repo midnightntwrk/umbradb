@@ -72,9 +72,14 @@
  *
  * **The items** `core-block-fetch` publishes for a block ({@link NodeBlockSource.blockItems}, `./items.ts`) come from
  * the block fetched, the ledger table (`selectLedgerVersion`), and the metadata of the runtime that built it, its
- * parent's state's or, at a delayed upgrade's first block, its own (`RuntimeMetadata.forBlock`: one
- * `state_getRuntimeVersion` per block, two at that block, one `state_getMetadata` per runtime), which decodes its
- * extrinsics. Every call it makes is one the system is allowed to make.
+ * parent's state's or, at a delayed upgrade's first block, its own (`RuntimeMetadata.forBlock`), which decodes its
+ * extrinsics. The metadata cache lives as long as the source, so `state_getRuntimeVersion` is asked at the first block
+ * of each `MNSV` version the process sees (twice at a delayed upgrade's first block), not at every block, and
+ * `state_getMetadata` once per runtime; the best blocks' cache (no retries) confirms its versions on its own. A block
+ * whose extrinsics do not decode with a confirmed version's cached metadata is checked in full
+ * (`forBlock(…, { check: true })`) before the decode's error is reported, so a wrong `MNSV` still ends in
+ * `metadata-mismatch`; {@link NodeBlockSource.checkRuntime} does the same for `core-chain-events` when a block's events do
+ * not decode. Every call it makes is one the system is allowed to make.
  *
  * **A block's chain events** ({@link NodeBlockSource.blockEvents}, `./events.ts`): `System::Events` read with
  * `state_getStorage` at the block's own hash, for `core-chain-events`, which decodes them. For a queued best block they
@@ -390,9 +395,17 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     }
     const { specVersion, ledger } = selectLedgerVersion(table, { height: block.height, hash: block.hash, digest: header.digest });
     const metadata = await this.metadataOf({ ...block, specVersion }, best);
-    const view = this.#view(metadata.metadata, block.height);
-    const extrinsics = decodeExtrinsics(view, node.extrinsics, block.height);
-    const timestampMs = blockTimeOf(view, extrinsics, block.height);
+    let extrinsics: ReturnType<typeof decodeExtrinsics>;
+    let timestampMs: ReturnType<typeof blockTimeOf>;
+    try {
+      const view = this.#view(metadata.metadata, block.height);
+      extrinsics = decodeExtrinsics(view, node.extrinsics, block.height);
+      timestampMs = blockTimeOf(view, extrinsics, block.height);
+    } catch (error) {
+      // Fail closed: the cached metadata may be a confirmed version's that did not build the block (the module comment).
+      await this.metadataOf({ ...block, specVersion }, best, true);
+      throw error;
+    }
     return Object.freeze({
       "block-header": Object.freeze({
         height: block.height,
@@ -440,6 +453,16 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     return root;
   }
 
+  /**
+   * Checks in full that `block` was built by the runtime of `specVersion`, its `MNSV` version (`forBlock` with `{ check:
+   * true }`): throws `metadata-mismatch` when it was not. `core-chain-events` asks it before it reports that a block's
+   * events do not decode with the block's `runtime-metadata`. A best block's check is made without retries.
+   */
+  async checkRuntime(block: BlockRef, specVersion: number): Promise<void> {
+    const best = this.#fetched.get(hexOf(block.hash))?.best ?? false;
+    await this.metadataOf({ ...block, specVersion }, best, true);
+  }
+
   /** The genesis ledger state: `system_properties.genesis_state`, with the client's retries. */
   async genesisState(): Promise<Uint8Array> {
     return genesisStateOf(await this.client.systemProperties());
@@ -448,11 +471,11 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   // ── seams (a negative control's) ────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * The metadata `block`'s content is decoded with: the runtime that built it (`forBlock`). A best block's is
-   * read without retries.
+   * The metadata `block`'s content is decoded with: the runtime that built it (`forBlock`), checked against the node
+   * when `check` is true or its version is not confirmed yet. A best block's is read without retries.
    */
-  protected metadataOf(block: MetadataBlock, best: boolean): Promise<RuntimeMetadataEntry> {
-    return (best ? this.#bestMetadata : this.#metadata).forBlock(block);
+  protected metadataOf(block: MetadataBlock, best: boolean, check = false): Promise<RuntimeMetadataEntry> {
+    return (best ? this.#bestMetadata : this.#metadata).forBlock(block, { check });
   }
 
   /** The last height the prefetch prepares with the loop's cursor at `cursor` and the head at `head`. */

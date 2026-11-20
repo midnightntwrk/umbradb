@@ -314,10 +314,11 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
       "SELECT encode(genesis_hash, 'hex') AS g, start_height::int AS s, encode(anchor_hash, 'hex') AS a FROM core_chain.identity",
     );
     expect(identity).toEqual({ g: g.hex.slice(2), s: 0, a: g.hex.slice(2) });
-    // Block 0's runtime and metadata at block 0 itself (`contentStateOf`); block 1's runtime there too.
+    // Block 0's runtime and metadata at block 0 itself (`contentStateOf`); blocks 1 and 2 take the version block 0
+    // confirmed, asking nothing.
     expect(run.node.calls.filter((c) => c.method === "state_getMetadata").map((c) => c.params)).toEqual([[g.hex]]);
-    const runtimes = run.node.calls.filter((c) => c.method === "state_getRuntimeVersion").map((c) => JSON.stringify(c.params));
-    expect(runtimes.sort()).toEqual([[g.hex], [g.hex], [hex((genesis[1] as ChainBlock).hash)]].map((p) => JSON.stringify(p)).sort());
+    const runtimes = run.node.calls.filter((c) => c.method === "state_getRuntimeVersion").map((c) => c.params);
+    expect(runtimes).toEqual([[g.hex]]);
     expect(run.seen.parsed.find((parsed) => parsed.height === 0n)?.calls).toEqual(time === null ? [] : ["Timestamp.set"]);
   }, PATIENCE_MS * 2);
 

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NodeBlockSource, nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { type Statement, statementText } from "../../src/db/repeated-statements.js";
+import type { MetadataBlock, RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import { ledgerTableOf } from "../../src/ledger/networks.js";
 import { type ConnectSocket, connectWebSocket, NodeClient } from "../../src/node/index.js";
 import { BlockItems } from "../../src/runner/block-context.js";
@@ -1208,6 +1209,71 @@ describe("core-block-fetch's items from the node", () => {
     expect(await rejection(broken.source.blockItems(block(9), table))).toMatchObject({
       message: expect.stringMatching(/the runtime metadata block 9 is decoded with cannot be read/),
     });
+  }, PATIENCE_MS);
+});
+
+describe("the runtime of a block whose MNSV version is confirmed (node call budget, FR-001–FR-003)", () => {
+  const table = ledgerTableOf("preprod", undefined);
+  /** Blocks 0–9 carry runtime 2.0's MNSV version; 8's Timestamp::set is under a pallet index RUNTIME's metadata lacks. */
+  const forged = chainOf(9n, (h) => (h === 8n ? { timestampPallet: 9 } : {}));
+  const f = (h: number): ChainBlock => forged[h] as ChainBlock;
+  const refOf = (block: ChainBlock): BlockRef => ({ height: block.height, hash: block.hash, parentHash: block.parentHash });
+  const runtimeAt = (block: ChainBlock, specVersion: number): TapeRecord => ({
+    method: "state_getRuntimeVersion",
+    params: [block.hex],
+    result: { specName: "midnight", implName: "midnight", authoringVersion: 1, specVersion, implVersion: 0, apis: [], transactionVersion: 2, systemVersion: 1 },
+  });
+  const fetchedBlock = (block: ChainBlock): TapeRecord => ({ method: "chain_getBlock", params: [block.hex], result: block.block });
+
+  it("asks the runtime version at the first block of a version only: later blocks of it take the cached metadata", async () => {
+    const { source, node } = await open([...content(f(1), RUNTIME, true), ...[2, 3, 4, 5, 6].map((h) => fetchedBlock(f(h)))]);
+    for (const h of [1, 2, 3, 4, 5, 6]) {
+      const items = await source.blockItems(refOf(f(h)), table);
+      expect(items["runtime-metadata"]).toEqual({ specVersion: 2_000_000, metadata: RUNTIME.metadata });
+    }
+    expect(node.count("state_getRuntimeVersion")).toBe(1);
+    expect(node.count("state_getMetadata")).toBe(1);
+  }, PATIENCE_MS);
+
+  it("checks a block in full before reporting that its extrinsics do not decode with the cached metadata", async () => {
+    // The node: 8's parent's state and its own run another runtime than its MNSV names, so the check fails.
+    const { source, node } = await open([...content(f(7), RUNTIME, true), fetchedBlock(f(8)), runtimeAt(f(7), 2_100_000), runtimeAt(f(8), 2_100_000)]);
+    await source.blockItems(refOf(f(7)), table);
+    expect(await rejection(source.blockItems(refOf(f(8)), table))).toMatchObject({
+      code: "metadata-mismatch",
+      details: { height: 8n, specVersion: 2_000_000, runtimeSpecVersion: 2_100_000, stateSpecVersion: 2_100_000 },
+    });
+    // The parent's runtime at 7, then 8's own: asked only once 8 did not decode.
+    expect(node.calls.filter((call) => call.method === "state_getRuntimeVersion").map((call) => call.params)).toEqual([[f(6).hex], [f(7).hex], [f(8).hex]]);
+  }, PATIENCE_MS);
+
+  it("reports the decode's own error when the full check confirms the runtime", async () => {
+    const { source } = await open([...content(f(7), RUNTIME, true), fetchedBlock(f(8)), runtimeAt(f(7), 2_000_000)]);
+    await source.blockItems(refOf(f(7)), table);
+    const error = await rejection(source.blockItems(refOf(f(8)), table));
+    expect(error).not.toBeInstanceOf(UmbraError);
+    expect(error).toBeInstanceOf(Error);
+  }, PATIENCE_MS);
+
+  it("negative control: a source that never checks a confirmed version again reports the decode error, not metadata-mismatch", async () => {
+    class NeverChecks extends NodeBlockSource {
+      protected override metadataOf(block: MetadataBlock, best: boolean): Promise<RuntimeMetadataEntry> {
+        return super.metadataOf(block, best);
+      }
+    }
+    const { source } = await open([...content(f(7), RUNTIME, true), fetchedBlock(f(8)), runtimeAt(f(7), 2_100_000), runtimeAt(f(8), 2_100_000)], {}, NeverChecks);
+    await source.blockItems(refOf(f(7)), table);
+    const error = await rejection(source.blockItems(refOf(f(8)), table));
+    expect(error).not.toMatchObject({ code: "metadata-mismatch" });
+  }, PATIENCE_MS);
+
+  it("checks the runtime for core-chain-events with the same full check (checkRuntime)", async () => {
+    const { source, node } = await open([...content(f(7), RUNTIME, true), runtimeAt(f(8), 2_100_000), runtimeAt(f(9), 2_100_000)]);
+    await source.blockItems(refOf(f(7)), table);
+    // A confirmed version is checked against the node all the same: 7's parent's runtime asked again.
+    await source.checkRuntime(refOf(f(7)), 2_000_000);
+    expect(node.count("state_getRuntimeVersion", [f(6).hex])).toBe(2);
+    expect(await rejection(source.checkRuntime(refOf(f(9)), 2_000_000))).toMatchObject({ code: "metadata-mismatch", details: { height: 9n } });
   }, PATIENCE_MS);
 });
 

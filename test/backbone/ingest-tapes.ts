@@ -86,8 +86,11 @@ export function upgradeTape(): { records: TapeRecord[]; upgrade: ChainBlock[]; e
     ...finalized(block(3), stateAfter(2)),
     ...finalized(block(4), stateAfter(3), true),
     ...finalized(block(5), stateAfter(4)),
-    // What a source decoding with a block's own state would also read: block 1's metadata there, block 5's runtime.
+    // What a source decoding with a block's own state would also read: block 1's metadata there, and the runtime at
+    // blocks 1, 2 and 5 (the right source asks the runtime only at 1's and F's parents: the first block of each).
     { method: "state_getMetadata", params: [block(1).hex], result: hex(OLD.metadata) },
+    { method: "state_getRuntimeVersion", params: [block(1).hex], result: { specName: "midnight", specVersion: OLD.specVersion, implVersion: 0, transactionVersion: 2 } },
+    { method: "state_getRuntimeVersion", params: [block(2).hex], result: { specName: "midnight", specVersion: OLD.specVersion, implVersion: 0, transactionVersion: 2 } },
     { method: "state_getRuntimeVersion", params: [block(5).hex], result: { specName: "midnight", specVersion: NEW.specVersion, implVersion: 0, transactionVersion: 2 } },
   ];
   const expected: Decoded[] = [1, 2, 3, 4, 5].map((h) => ({
