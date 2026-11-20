@@ -47,6 +47,7 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   listen: ["operational", { default: { admin: "0.0.0.0:8081" } }],
   tipCap: ["operational", { default: 600 }],
   prefetchWindow: ["operational", { default: 64 }],
+  ledgerRootInterval: ["operational", { default: 600 }],
   backoffCeilingMs: ["operational", { default: 30_000 }],
   backupAtStop: ["operational", "absent"],
   // SIGUSR2 writes a backup there.
@@ -124,6 +125,14 @@ describe("the core entry's fields, kinds and defaults", () => {
     const read = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, apiReadTimeoutMs: value }).success;
     expect([1, 30_000, MAX_READ_TIMEOUT_MS].map(read)).toEqual([true, true, true]);
     expect([0, MAX_READ_TIMEOUT_MS + 1, 1.5, "1000"].map(read)).toEqual([false, false, false, false]);
+  });
+
+  it("ledgerRootInterval is a whole number of at least 1 (1: every height's root compared), 600 unless given", () => {
+    const interval = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, ledgerRootInterval: value });
+    expect(interval(1).success).toBe(true);
+    expect(interval(10_000_000).success).toBe(true);
+    for (const value of [0, -1, 1.5, "600", null]) expect(interval(value).success, String(value)).toBe(false);
+    expect((PUBLIC_CORE_SCHEMA.parse(REQUIRED_PUBLIC) as { ledgerRootInterval: number }).ledgerRootInterval).toBe(600);
   });
 
   it("reclamationCache: keys a whole number from 0 (0: no copy), verify a boolean, each defaulted alone, nothing else", () => {

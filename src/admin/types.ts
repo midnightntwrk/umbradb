@@ -127,6 +127,12 @@ export interface PrivateInstanceStatus {
   readonly height: string | null;
 }
 
+/** What `/status` shows of the ledger (see {@link StatusSnapshot.ledger}). */
+export interface LedgerStatus {
+  /** The last height whose root matched the node's, as decimal text. */
+  readonly lastRootMatch: string;
+}
+
 /** `status()` as the admin endpoints show it (see the module comment): `/status` without its uptime. */
 export interface StatusSnapshot {
   readonly state: ProcessState;
@@ -151,8 +157,11 @@ export interface StatusSnapshot {
   readonly node: NodeStatus | null;
   /** Every part of the database, in startup order; null until startup resolved them. */
   readonly modules: readonly ModuleStatus[] | null;
-  /** The ledger version in effect, its package and its last root check: null, since nothing reports it yet. */
-  readonly ledger: null;
+  /**
+   * The ledger's last root check: the last height whose ledger state root `core-ledger-state` compared with the node's
+   * and found matching in this process; null before any, without `core-ledger-state`, and on a private process.
+   */
+  readonly ledger: LedgerStatus | null;
   /**
    * On the core, its private instances: every listed instance, connected or not, and every other connected one. Null
    * on a private process, and on the core until startup has opened its database.

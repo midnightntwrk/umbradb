@@ -76,6 +76,12 @@ export type CoreSettingsBase = {
   readonly listen?: Listen;
   readonly tipCap?: number;
   readonly prefetchWindow?: number;
+  /**
+   * How often `core-ledger-state` compares its ledger state root with the node's: at block 0, at every multiple of it,
+   * at each run's first height and at each ledger or runtime change; a whole number of at least 1 (600; 1 for every
+   * height).
+   */
+  readonly ledgerRootInterval?: number;
   readonly backoffCeilingMs?: number;
   /** A file path. */
   readonly backupAtStop?: string;

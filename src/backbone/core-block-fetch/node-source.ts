@@ -91,7 +91,10 @@
  * `on-compute`.
  *
  * **The roots' prefetch.** Once `core-ledger-state` has asked for a root in a run, the prefetch also asks for the root of
- * each finalized height it fetches itself (never a queued best block's), in a slot of its own after the block's take.
+ * each finalized height it fetches itself (never a queued best block's) whose root `core-ledger-state` compares by the
+ * height alone (block 0 and the multiples of `ledgerRootInterval`, as it tells the source: `rootsChecked`), in a slot of
+ * its own after the block's take. A height compared for another reason (a run's first, a ledger or runtime change) is
+ * asked at its `on-compute`, unprefetched; a height not compared is never asked.
  * `on-compute` then finds the answer waiting instead of paying the node's latency in every block. It is the same call,
  * with the same retries, at the same finalized hash, so its answer or its error is the one `on-compute` gets. It is kept
  * until the loop passes the height, so a block applied again (the restart after a refused eviction) asks no second
@@ -244,6 +247,10 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   #rootsWanted = false;
   /** Aborts the roots' calls of this run when it ends. */
   #rootsAbort = new AbortController();
+  /** The heights whose roots the prefetch may ask for: every one until `core-ledger-state` says (`rootsChecked`). */
+  #rootPrefetched: (height: bigint) => boolean = () => true;
+  /** The last height whose root `core-ledger-state` compared and found matching (`rootMatched`); null before any. */
+  #lastRootMatch: bigint | null = null;
 
   // ── the metadata ────────────────────────────────────────────────────────────────────────────────────────────────
   readonly #metadata: RuntimeMetadata;
@@ -362,7 +369,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   }
 
   nodeView(): SourceNodeView {
-    return Object.freeze({ bestHead: this.#announcedBest, queueDepth: this.#queue.length });
+    return Object.freeze({ bestHead: this.#announcedBest, queueDepth: this.#queue.length, lastRootMatch: this.#lastRootMatch });
   }
 
   conditions(): readonly SourceCondition[] {
@@ -439,7 +446,9 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     if (!this.#rootsWanted && this.#runner !== undefined) {
       this.#rootsWanted = true;
       // The heights the prefetch fetched before this first ask, all within the window, get their roots asked now.
-      for (const [height, hash] of this.#fetchedFinalized) if (height > block.height) this.#prefetchRoot(height, hash);
+      for (const [height, hash] of this.#fetchedFinalized) {
+        if (height > block.height && this.#rootPrefetched(height)) this.#prefetchRoot(height, hash);
+      }
     }
     if (this.#runner === undefined) return this.client.ledgerStateRoot(block.hash);
     const key = hexOf(block.hash);
@@ -461,6 +470,16 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   async checkRuntime(block: BlockRef, specVersion: number): Promise<void> {
     const best = this.#fetched.get(hexOf(block.hash))?.best ?? false;
     await this.metadataOf({ ...block, specVersion }, best, true);
+  }
+
+  /** Which heights' roots `core-ledger-state` compares by the height alone: the only ones the prefetch asks for. */
+  rootsChecked(checked: (height: bigint) => boolean): void {
+    this.#rootPrefetched = checked;
+  }
+
+  /** `core-ledger-state` compared the root at `height` and it matched: `/status`'s `ledger.lastRootMatch`. */
+  rootMatched(height: bigint): void {
+    if (this.#lastRootMatch === null || height > this.#lastRootMatch) this.#lastRootMatch = height;
   }
 
   /** The genesis ledger state: `system_properties.genesis_state`, with the client's retries. */
@@ -682,7 +701,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     live();
     if (queued !== undefined) return queued;
     this.#fetchedFinalized.set(height, hash);
-    if (this.#rootsWanted) this.#prefetchRoot(height, hash);
+    if (this.#rootsWanted && this.#rootPrefetched(height)) this.#prefetchRoot(height, hash);
     return this.#slot(async () => {
       const node = await this.client.block(hash);
       live();

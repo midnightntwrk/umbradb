@@ -203,6 +203,49 @@ describe("core-ledger-state's parts", () => {
       details: { height: 1n, hash: `0x${"02".repeat(32)}`, node: "0x000102", computed: `0x00${"40".repeat(32)}` },
     });
     expect((error as Error).message).toMatch(/after block 1 .* is 0x0040.*and the node's is 0x000102/);
+    // The first check in this process: no height matched before it.
+    expect(error).toMatchObject({ details: { lastMatchedHeight: null } });
+    expect((error as Error).message).toMatch(/no root matched the node's in this process before it/);
+  });
+
+  it("asks the node's root only at the heights it checks, and names the last matched one in a root-mismatch", async () => {
+    // The process's operational settings are its latest core revision of the build's version (`latestBuildCoreEntry`).
+    const core = { entries: [{ id: "core", start: 0, buildVersion: true, settings: { retainStates: 0, ledgerRootInterval: 10 } }] };
+    const p = context(core as unknown as ReturnType<typeof config>);
+    const asked: bigint[] = [];
+    const told: bigint[] = [];
+    let wrongAt = -1n;
+    const { host } = bound(applied(1n).stateRoot);
+    let checked: ((height: bigint) => boolean) | undefined;
+    bindCoreLedgerState(p, {
+      ledger: host,
+      source: {
+        ledgerStateRoot: async (b) => {
+          asked.push(b.height);
+          return b.height === wrongAt ? Uint8Array.of(9) : applied(1n).stateRoot;
+        },
+        genesisState: async () => Uint8Array.of(7),
+        rootsChecked: (predicate) => void (checked = predicate),
+        rootMatched: (height) => void told.push(height),
+      },
+    });
+    const continuing = (height: bigint, items: Record<string, unknown> = {}) => ({ ...block(height, items), continues: height !== 8n });
+    for (const h of [8n, 9n, 10n, 11n]) await applyBlock(p, continuing(h), reading([{ ms: 1n }]));
+    // 8 is the run's first height, 10 a multiple of the interval; 9 and 11 are neither.
+    expect(asked).toEqual([8n, 10n]);
+    expect(told).toEqual([8n, 10n]);
+    expect([0n, 5n, 10n, 20n].map((h) => checked?.(h))).toEqual([true, false, true, true]);
+    // A runtime change at 12 is checked; so is a ledger change at 13.
+    await applyBlock(p, continuing(12n, { "block-header": { specVersion: 2_001_000, timestampMs: 1_750_000_006_000n } }), reading([{ ms: 1n }]));
+    await applyBlock(p, continuing(13n, { "block-header": { specVersion: 2_001_000, timestampMs: 1_750_000_006_000n }, "ledger-version": "v9-rc5" }), reading([{ ms: 1n }]));
+    expect(asked).toEqual([8n, 10n, 12n, 13n]);
+    wrongAt = 20n;
+    const at = (h: bigint) => continuing(h, { "block-header": { specVersion: 2_001_000, timestampMs: 1_750_000_006_000n }, "ledger-version": "v9-rc5" });
+    for (let h = 14n; h < 20n; h++) await applyBlock(p, at(h), reading([{ ms: 1n }]));
+    const error = await applyBlock(p, at(20n), reading([{ ms: 1n }])).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "root-mismatch", details: { height: 20n, lastMatchedHeight: 13n } });
+    expect((error as Error).message).toMatch(/the last height whose root matched the node's is 13, so restore a backup at or below it/);
+    expect(asked).toEqual([8n, 10n, 12n, 13n, 20n]);
   });
 
   it("fails with the node's error when the node's root cannot be read", async () => {

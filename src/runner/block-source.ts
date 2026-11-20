@@ -159,4 +159,9 @@ export interface SourceNodeView {
   readonly bestHead: bigint | null;
   /** How many best blocks the queue holds now: 0 while it holds none. */
   readonly queueDepth: number;
+  /**
+   * The last height whose ledger state root `core-ledger-state` compared with the node's and found matching in this
+   * process; null before any, and without `core-ledger-state`. Absent for a source that does not know.
+   */
+  readonly lastRootMatch?: bigint | null;
 }

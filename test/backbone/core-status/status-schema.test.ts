@@ -130,6 +130,33 @@ describe("/status's JSON schema", () => {
     expect(STATUS_SCHEMA.problems({ ...body(), node: without })).not.toEqual([]);
   });
 
+  it("holds the ledger's last matched root check, or null; and refuses another form", () => {
+    expect((body() as { ledger: unknown }).ledger).toBeNull();
+    expect(STATUS_SCHEMA.problems({ ...body(), ledger: { lastRootMatch: "600" } })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), ledger: { lastRootMatch: "0" } })).toEqual([]);
+    for (const wrong of [{ lastRootMatch: 600 }, { lastRootMatch: "-1" }, { lastRootMatch: "0600" }, {}, { lastRootMatch: "6", interval: 1 }]) {
+      expect(STATUS_SCHEMA.problems({ ...body(), ledger: wrong }), JSON.stringify(wrong)).not.toEqual([]);
+    }
+    // The snapshot shows the node source's lastRootMatch on the core, and nothing on a private process.
+    const facts = (side: "public" | "private") => ({
+      livenessTimeoutMs: 30_000,
+      readinessLag: null,
+      redactor: null,
+      config: UNVALIDATED_CONFIG,
+      startedNs: 0n,
+      side,
+      instanceId: side === "private" ? "keeper" : null,
+      tipCap: 600,
+      lastCommitMs: null,
+      modules: null,
+      digests: new Map(),
+      node: { bestHead: null, connection: null, queueDepth: null, calls: null, lastRootMatch: 1_200n },
+    });
+    const status = statusOf({ phase: "running", start: 0n, cursor: 1_250n, head: 1_250n, followingThreshold: 3, readinessLag: null, conditions: [], ended: null, reason: null });
+    expect(snapshotOf(status, facts("public")).status.ledger).toEqual({ lastRootMatch: "1200" });
+    expect(snapshotOf(status, facts("private")).status.ledger).toBeNull();
+  });
+
   it("holds slow-block: the height, the point, the module or null while none runs", () => {
     const slow = { code: "slow-block", height: "4", point: "on-compute", module: "m" };
     expect(STATUS_SCHEMA.problems({ ...body(), conditions: [slow] })).toEqual([]);

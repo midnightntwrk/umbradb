@@ -121,8 +121,16 @@
       ]
     },
     "ledger": {
-      "type": "null",
-      "description": "The ledger version, package and last root check: null until the ledger tasks (12.x) report them."
+      "description": "The ledger's last root check: the last height whose ledger state root core-ledger-state compared with the node's and found matching in this process (ledgerRootInterval); null before any, without core-ledger-state, and on a private process.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["lastRootMatch"],
+          "additionalProperties": false,
+          "properties": { "lastRootMatch": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" } }
+        }
+      ]
     },
     "privateInstances": {
       "description": "On the core, its private instances (PP-9, AE-5; task 14.4): each listed or connected one with its id, connection, lockstep flag and synced height only; null on a private process, and on the core until startup opened its database.",

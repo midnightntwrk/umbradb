@@ -181,6 +181,7 @@ The `core` entry's settings, the main ones (`GET /config` shows them all, with t
 | `backupAtStop` | none | A file the process writes a backup to at the core's `stop` |
 | `backupOnSignal` | none | A file the process writes a backup to on SIGUSR2, without stopping |
 | `retainStates` | `0` | Ledger states kept before the latest (`core-ledger-state`) |
+| `ledgerRootInterval` | `600` | How often `core-ledger-state` compares its ledger state root with the node's (`midnight_ledgerStateRoot`): at block 0, every multiple of it, each run's first height and each ledger or runtime change; `1` compares every height. A replay that differs from the node is found up to `ledgerRootInterval` − 1 blocks late, the blocks between already stored; `root-mismatch` names `lastMatchedHeight`, and the recovery is a backup restore at or below it, so keep backups at least as often as the interval |
 | `reclamationCache` | `{ keys: 100000, verify: false }` | The counts and child lists `core-ledger-state`'s reclamation keeps in memory between blocks: at most `keys` of each (0 for none; 71.9 MiB of heap at 100,000 with lists of 16 references), and whether each one it answers is also read from the database, a difference halting the block. Exact on tables undamaged at the start and written by this process only |
 | `livenessTimeoutMs` | `30000` | `/health/live` answers 503 when the main loop is stuck longer |
 | `slowBlockMs` | `60000` | The `slow-block` condition after a height runs longer |
@@ -332,7 +333,8 @@ run in a worker thread of their own, so they answer while a block holds the data
 - `GET /status`: the state, conditions, cursor, node head and lag; the `reason` of a refusal or halt (its code,
   height, module and point); the node, with the calls the process sent it per method since it started
   (`node.calls`: calls, tries, frames and failed calls by code, for measuring a provider's request quota); every module
-  with its tables' digests; the ledger; the private instances.
+  with its tables' digests; the ledger (`ledger.lastRootMatch`: the last height whose ledger state root matched the
+  node's, `ledgerRootInterval`); the private instances.
 - `GET /config`: the configuration as validated (secrets `[redacted]`), its history, every module's declaration
   without its callbacks, the chain, the ledger table, the database, and how each surface is served (`network`:
   `listening`, `connecting`, `mounted`, `channels`, `connect` or `none`).

@@ -237,7 +237,8 @@ export function a169Problems(scenario: LoopStopScenario, observed: A169Observati
 /** The `core` entry and the build's entries for `scenario` against the node at `url` on `db`. */
 function entriesOf(db: ProcessDatabase, scenario: LoopStopScenario, url: string): Record<string, unknown>[] {
   const genesisHash = genesisOf(scenario.records) as string;
-  const extra = { node: url, genesisHash, backoffCeilingMs: CEILING_MS, prefetchWindow: 1 };
+  // `ledgerRootInterval: 1`: every height's root is asked, so h + 1's on-compute awaits it (the root scenario's cut).
+  const extra = { node: url, genesisHash, backoffCeilingMs: CEILING_MS, prefetchWindow: 1, ledgerRootInterval: 1 };
   return [
     core(db.setting, Number(scenario.start), { extra }),
     ...scenario.core.map((module) => entryOf(module, Number(scenario.start))),

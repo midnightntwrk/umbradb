@@ -16,6 +16,14 @@ export interface BlockLedgerSource {
   ledgerStateRoot(block: BlockRef): Promise<Uint8Array>;
   /** The chain's genesis ledger state, as the ledger serializes it (`system_properties.genesis_state`). */
   genesisState(): Promise<Uint8Array>;
+  /**
+   * Optional (a source that prefetches roots): which heights' roots `core-ledger-state` asks for by the height alone
+   * (block 0 and the multiples of `ledgerRootInterval`, `../core-ledger-state/root-checks.ts`), so that no root is
+   * prefetched for a height it does not compare. It is told again at every `on-compute`.
+   */
+  rootsChecked?(checked: (height: bigint) => boolean): void;
+  /** Optional: the root at `height` was compared with the replay's and matched, which `/status` shows. */
+  rootMatched?(height: bigint): void;
 }
 
 /** Whether `source` gives `core-ledger-state` the node's roots and genesis state (the node source). */

@@ -304,9 +304,11 @@ describe("the root check", () => {
     });
     for (const backend of PROCESS_BACKENDS) {
       const db = await backend.database();
+      // Every height's root compared, as the criterion was written (the interval's checks: ledger-root-interval.test.ts).
       const process = await ingest(db, scenario.records, {
         start: 0n,
         core: LEDGER_CORE,
+        settings: { ledgerRootInterval: 1 },
         ledgerWorker: () =>
           startLedgerWorker({ loader: LOADER, loaderData: { wrongRootAt: "2" } }),
       });
@@ -454,8 +456,8 @@ describe("on the recorded ranges from genesis (each skipped by name without its 
     { timeoutMs: REPLAY_MS + 600_000 },
   );
   // The committed control: a table that maps runtime 2.0 to `v9` (9.1.0.1; the old table mapped it to rc.5, then the
-  // `v9` package), set here as a configured row. It halts at block 1 with root-mismatch, and nothing of block 1 is
-  // stored. Block 1's one system transaction is a `CNightGeneratesDustUpdate`, a DUST generation, whose rules changed
+  // `v9` package), set here as a configured row. With every height's root compared (`ledgerRootInterval: 1`) it halts at
+  // block 1 with root-mismatch, and nothing of block 1 is stored (at the default interval it would halt at 600). Block 1's one system transaction is a `CNightGeneratesDustUpdate`, a DUST generation, whose rules changed
   // after rc.3.
   tapeTest(
     "stagenet-0-10000",
@@ -464,7 +466,11 @@ describe("on the recorded ranges from genesis (each skipped by name without its 
       replayRange(
         found,
         BigInt(found.tape.to),
-        { network: found.tape.network, ledgerTable: { rows: [{ specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] } },
+        {
+          network: found.tape.network,
+          ledgerTable: { rows: [{ specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] },
+          ledgerRootInterval: 1,
+        },
         { height: 1n, code: "root-mismatch" },
       ),
     { timeoutMs: 600_000 },

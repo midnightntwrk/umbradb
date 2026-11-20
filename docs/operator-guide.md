@@ -150,7 +150,9 @@ On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` w
   attempts; the requests per block are `attempts` over the heights committed.
 
 What a finalized height asks of the node: `chain_getBlockHash` and `chain_getBlock`, and `state_getStorage` (its
-`System::Events`) with `core-chain-events`. The runtime that built a block is named in its header (its `MNSV` digest),
+`System::Events`) with `core-chain-events`. With `core-ledger-state`, `midnight_ledgerStateRoot` is asked only at the
+heights whose root it compares (see [The ledger root check](#the-ledger-root-check)): at the default interval, 17 of
+the 10,001 heights of a sync from genesis to 10,000. The runtime that built a block is named in its header (its `MNSV` digest),
 so `state_getRuntimeVersion` is asked only at the first block of each runtime version the process sees (twice at a
 delayed upgrade's first block: its parent's state, then its own) and `state_getMetadata` once per runtime; the later
 blocks of a version are decoded with its cached metadata. A block whose extrinsics or events do not decode with that
@@ -159,6 +161,32 @@ its header names still halts with `metadata-mismatch`.
 
 A private process has no node: its `node` is null. The process publishes what `/status` shows at least once a second,
 and at once when the connection's state changes.
+
+## The ledger root check
+
+`core-ledger-state` replays every block into the ledger state and stores the state's root at every height. It compares
+that root with the node's (`midnight_ledgerStateRoot`) only at some heights, set by the `core` entry's
+`ledgerRootInterval` (600 by default, about an hour of blocks):
+
+- block 0, always (its root also decides how the genesis state is applied);
+- every height that is a multiple of `ledgerRootInterval`;
+- the first height of each run of processing: the process's start, and the height processed again after any retry, so
+  a restart never lengthens the unchecked gap;
+- the first block of each ledger-version change (the v8 → v9 conversion block) and of each runtime version change.
+
+A backup restore compares the backup's root with the node's whatever the interval (`backup-root-mismatch`).
+`ledgerRootInterval: 1` compares every height, as before the setting existed.
+
+A root that differs halts the process with `root-mismatch` before that height is stored. Its details hold the height,
+the block's hash, both roots, and `lastMatchedHeight`: the last height whose root matched the node's in this process
+(null when the first check after a start failed; the earlier run's `/status` showed its last match). A replay that
+differs from the node from some height d on is found at the next checked height, up to `ledgerRootInterval` − 1 blocks
+later, and the blocks from d to the height before the halt are already stored, with ledger data that may be wrong. The
+process does not rewind them: restore a backup taken at or below `lastMatchedHeight`, then start again. So keep backups
+(`backupOnSignal`, `backupAtStop`) at least as often as the interval.
+
+`/status`'s `ledger` shows `{ "lastRootMatch": "<height>" }`, the last height whose root matched in this process; it is
+null before the first check passes, without `core-ledger-state`, and on a private process.
 
 ## A paused loop on `/status`
 
@@ -438,7 +466,7 @@ that height.
 | `beginMs` | The wait for the block from its source, and the height's start. |
 | `prepareMs` | The points before the block's transaction (`on-fetch` to `on-compute`). It holds `applyMs` and `collectMs`. |
 | `applyMs`, `tx` | The block applied by the ledger worker, as the main thread waited for it, and the block's number of transactions. |
-| `rootWaitMs` | Of `applyMs`: the wait for the node's state root once the worker had answered. It is the node's time. |
+| `rootWaitMs` | Of `applyMs`: the wait for the node's state root once the worker had answered. It is the node's time; 0 at a height whose root is not compared (`ledgerRootInterval`). |
 | `collectMs` | The block's flush handed over to the reclamation, in memory. |
 | `stepMs`, `evictMs` | Inside `txMs`, at `on-settle`: the reclamation of the run of blocks the height ends (one block), its reads included, and the eviction of the nodes it deletes from the worker, awaited. |
 | `evictRefused` | 1 when the ledger package refused that eviction: the worker thread was ended and the block committed. |

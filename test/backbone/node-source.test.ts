@@ -1318,6 +1318,30 @@ describe("the ledger roots' prefetch (00033 F1)", () => {
     for (let height = 1; height <= 40; height++) expect(rootCalls(node, at(height))).toBe(1);
   }, PATIENCE_MS);
 
+  it("prefetches only the roots core-ledger-state compares by the height alone (rootsChecked), and shows the last match", async () => {
+    const { source, node } = await open(catchUpWithRoots(40), { prefetchWindow: 8, concurrency: 3 });
+    source.attach(new Recorder());
+    // As core-ledger-state does at every on-compute: interval 10.
+    source.rootsChecked((height) => height === 0n || height % 10n === 0n);
+    await source.finalizedHead();
+    expect(source.nodeView().lastRootMatch).toBeNull();
+    for (let height = 1n; height <= 40n; height++) {
+      await source.prepared(height);
+      // Height 1 is a run's first: asked at its on-compute, unprefetched; then the multiples of 10.
+      if (height === 1n || height % 10n === 0n) {
+        expect(hex(await source.ledgerStateRoot(refOf(at(Number(height)))))).toBe(root(at(Number(height))));
+        source.rootMatched(height);
+      }
+    }
+    await sleep(50);
+    const asked = node.calls.filter((c) => c.method === "midnight_ledgerStateRoot").map((c) => (c.params as string[])[0]);
+    expect(asked.sort()).toEqual([1, 10, 20, 30, 40].map((h) => at(h).hex).sort());
+    expect(source.nodeView().lastRootMatch).toBe(40n);
+    // A lower height reported later does not lower it.
+    source.rootMatched(5n);
+    expect(source.nodeView().lastRootMatch).toBe(40n);
+  }, PATIENCE_MS);
+
   it("asks no second time when the block is applied again in the run (the restart after a refused eviction)", async () => {
     const { source, node } = await open(catchUpWithRoots(10), { prefetchWindow: 4 });
     source.attach(new Recorder());

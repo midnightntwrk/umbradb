@@ -1731,6 +1731,7 @@ class Process implements ProcessHandle {
       connection: this.#nodeClient?.connection ?? null,
       queueDepth: view?.queueDepth ?? null,
       calls: this.#nodeClient?.calls ?? null,
+      lastRootMatch: view?.lastRootMatch ?? null,
     });
   }
 

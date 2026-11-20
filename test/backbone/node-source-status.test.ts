@@ -90,9 +90,9 @@ describe("the node as the node source reports it to /status", () => {
       newHead(head),
     ];
     const { client, source } = await open(records);
-    expect(source.nodeView()).toEqual({ bestHead: null, queueDepth: 0 });
+    expect(source.nodeView()).toEqual({ bestHead: null, queueDepth: 0, lastRootMatch: null });
     await source.finalizedHead();
-    expect(source.nodeView()).toEqual({ bestHead: null, queueDepth: 0 });
+    expect(source.nodeView()).toEqual({ bestHead: null, queueDepth: 0, lastRootMatch: null });
     // No loop runs (nothing attached): nothing is queued, the announcements are taken all the same.
     await pass(client, 1);
     await until(() => source.nodeView().bestHead === 103n, "103 announced");
@@ -100,7 +100,7 @@ describe("the node as the node source reports it to /status", () => {
     await until(() => source.nodeView().bestHead === 102n, "102′ announced");
     await pass(client, 3);
     await until(() => source.nodeView().bestHead === 100n, "100 announced");
-    expect(source.nodeView()).toEqual({ bestHead: 100n, queueDepth: 0 });
+    expect(source.nodeView()).toEqual({ bestHead: 100n, queueDepth: 0, lastRootMatch: null });
     expect(Object.isFrozen(source.nodeView())).toBe(true);
   }, PATIENCE_MS);
 
@@ -124,7 +124,7 @@ describe("the node as the node source reports it to /status", () => {
     // Full at tipCap 2: 103 is announced and not queued.
     await until(() => source.conditions().length === 1, "the queue full");
     await source.idle();
-    expect(source.nodeView()).toEqual({ bestHead: 103n, queueDepth: 2 });
+    expect(source.nodeView()).toEqual({ bestHead: 103n, queueDepth: 2, lastRootMatch: null });
     expect(source.conditions()).toEqual([{ code: "finality-stall", tipCap: 2, height: 103n }]);
     // 101 finalized: the loop takes it from the queue.
     await pass(client, 1);
@@ -132,12 +132,12 @@ describe("the node as the node source reports it to /status", () => {
     expect((await source.finalizedHead()).height).toBe(101n);
     expect((await source.prepared(101n)).block.hash).toEqual(A(101).hash);
     await source.idle();
-    expect(source.nodeView()).toEqual({ bestHead: 103n, queueDepth: 1 });
+    expect(source.nodeView()).toEqual({ bestHead: 103n, queueDepth: 1, lastRootMatch: null });
     expect(source.conditions()).toEqual([]);
     // The run ends: its queue is dropped; the best head stays the one announced last.
     detach();
-    expect(source.nodeView()).toEqual({ bestHead: 103n, queueDepth: 0 });
+    expect(source.nodeView()).toEqual({ bestHead: 103n, queueDepth: 0, lastRootMatch: null });
     await source.close();
-    expect(source.nodeView()).toEqual({ bestHead: 103n, queueDepth: 0 });
+    expect(source.nodeView()).toEqual({ bestHead: 103n, queueDepth: 0, lastRootMatch: null });
   }, PATIENCE_MS);
 });
