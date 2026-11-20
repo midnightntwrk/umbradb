@@ -232,7 +232,7 @@ describe("the browser build in headless Chrome", () => {
       // The loop reads head 6 and processes 4 to 6; once 4 and 5 are fetched the node finalizes 9, and the core is held
       // before 6 (its first node call of 6 unanswered until the hold is released).
       const hold = heldClock();
-      const node = await tapeNode([...headSession(chain, 3n), ...heldBefore(raisedHeadSession(chain, 3n, 6n, 9n), 6n)], hold.clock);
+      const node = await tapeNode([...headSession(chain, 3n), ...heldBefore(chain, raisedHeadSession(chain, 3n, 6n, 9n), 6n)], hold.clock);
       const browser = await chrome();
       const tab = await browser.open(pageUrl(bench.server.origin, params({ node: node.url })));
       await statusWhen(tab, "core", (s) => s.cursor === "5", "the core at 5, held before 6");
@@ -255,7 +255,7 @@ describe("the browser build in headless Chrome", () => {
       // listed as lockstep, both wait at 5 while the page drops p1's link and p1 connects again; then 6 to 9 go over
       // the new channel.
       const hold = heldClock();
-      const node = await tapeNode([...headSession(chain, 3n), ...heldBefore(syncSession(chain, 3n, 9n), 6n)], hold.clock);
+      const node = await tapeNode([...headSession(chain, 3n), ...heldBefore(chain, syncSession(chain, 3n, 9n), 6n)], hold.clock);
       const browser = await chrome();
       const tab = await browser.open(pageUrl(bench.server.origin, params({ node: node.url, private: "1", lockstep: "1" })));
       await statusWhen(tab, "core", (s) => s.cursor === "5", "the core at 5, held before 6");
