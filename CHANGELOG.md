@@ -48,6 +48,13 @@ adheres to [Semantic Versioning](https://semver.org/).
   migration `002`) and in the `contract-logs` block item, instead of halting with `fast-log-unsupported`, which is
   removed.
 
+### Fixed
+
+- A backup or restore of a database whose ledger state holds more than 2^24 node keys (stored and embedded; Preprod
+  at height 3.5 million) no longer fails with `RangeError: Set maximum size exceeded`: the contents hash of
+  `core-ledger-state`'s node tables holds the keys in sets sharded by their first byte and hashes the node set key by
+  key. The contents hash is unchanged.
+
 ## [0.10.0] - 2026-10-27
 
 ### Breaking changes

@@ -194,7 +194,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
         expect([...content.keys()].sort()).toEqual(["nodes", "ref_counts", "unreferenced"]);
         const nodes = content.get("nodes");
         expect(nodes?.columns).toEqual([{ name: "node_key", type: "bytea" }]);
-        expect(nodes?.rows.map(([key]) => hexOf(key as Uint8Array))).toEqual(NODE_SET);
+        expect([...(nodes?.rows ?? [])].map(([key]) => hexOf(key as Uint8Array))).toEqual(NODE_SET);
         expect(content.get("ref_counts")).toBeNull();
         expect(content.get("unreferenced")).toBeNull();
       }
