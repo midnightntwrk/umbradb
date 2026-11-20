@@ -254,6 +254,8 @@ EOF
         i=$(index_of "$net")
         cat <<EOF
     location /$net/admin/ { proxy_pass http://127.0.0.1:808$i/; }
+    # /config shows the host's layout (database, ports, versions): for operators, over ssh.
+    location = /$net/admin/config { return 404; }
     location /$net/ { proxy_pass http://127.0.0.1:809$i/; }
 EOF
       done
