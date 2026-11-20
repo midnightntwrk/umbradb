@@ -122,6 +122,11 @@ export interface PreparedBlock {
  */
 export interface QueueRunner {
   /**
+   * The last height the loop processes in this run: the core's stop, or the height before an upgrade boundary,
+   * whichever is lower; null for neither. A source asks the node nothing for a height above it. Absent: no bound.
+   */
+  readonly lastHeight?: bigint | null;
+  /**
    * `on-fetch`, then `on-parse`, for `block`: each callback with its block context and an item sink, as the loop gives
    * them. Resolves with the block's items, or rejects with the dispatch's `CallbackFailure`. Throws for a height no
    * range of the graph holds.

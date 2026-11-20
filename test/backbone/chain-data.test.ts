@@ -155,14 +155,15 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     const events = eventsValue([E.success(0), E.txApplied(1, r), E.success(1), E.systemApplied("finalization", s)].map((e) => e.record));
     const records: TapeRecord[] = [
       ...opening(block(0), block(1)),
-      ...finalizedWithEvents(block(1), RUNTIME_2_0, eventsValue([E.success(0).record]), true),
+      // Block 1 is the head the process read: its hash is known, so only its content is asked (FR-011).
+      ...content(block(1), RUNTIME_2_0, true),
+      eventsRead(block(1), eventsValue([E.success(0).record])),
       // Following at the head 1: block 2 is announced, fetched, its metadata read (the best-block calls' own cache, no
       // retries), its events read and its transactions parsed — then finalized with that hash and taken as queued.
       newHead(block(2)),
       ...content(block(2), RUNTIME_2_0, true),
       eventsRead(block(2), events),
       finalizedHead(block(2)),
-      { method: "chain_getBlockHash", params: [2], result: block(2).hex },
     ];
     const scenario = { start: 1n, head: 2n, records, transactions: [] } as unknown as Scenario;
     const { db, seen, process, deserialized } = await run(scenario);

@@ -42,8 +42,9 @@ Blocks above the finalized head can still change. For each new head the node ann
 
 - `on-best-block` runs with its header only (height, hash, parent hash); there is no database handle.
 - The block is fetched, and `on-fetch` and `on-parse` run, so its items are ready if it becomes final.
-- It joins the best-block queue: at most `tipCap` blocks (600 by default), and only while the finalized head is within
-  `prefetchWindow` (64) of the cursor. A full queue sets the `finality-stall` condition.
+- It joins the best-block queue: at most `tipCap` blocks (600 by default), only while the finalized head is within
+  `prefetchWindow` (64) of the cursor, and never above the last height the loop will process (the core's `stop`, or the
+  height before an upgrade boundary). A full queue sets the `finality-stall` condition.
 - When the node switches to another fork, the queued blocks above the common ancestor are dropped with one
   `on-rollback`, lowest first, and the new branch is fetched.
 

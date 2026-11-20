@@ -150,7 +150,12 @@ On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` w
   attempts; the requests per block are `attempts` over the heights committed.
 
 What a finalized height asks of the node: `chain_getBlockHash` and `chain_getBlock`, and `state_getStorage` (its
-`System::Events`) with `core-chain-events`. With `core-ledger-state`, `midnight_ledgerStateRoot` is asked only at the
+`System::Events`) with `core-chain-events`. While the process follows the head (the head within `prefetchWindow` of
+the cursor), the finalized hashes come from the finalized-heads notifications, each naming its block and its parent,
+and from the queued best blocks' parent links, so `chain_getBlockHash` is asked only for a height none of them names
+(after a jump in finality, or a reconnect); a best block that finalizes is not fetched again. Following the tip with
+`core-chain-events` thus costs about 2 calls per block (`chain_getBlock` and `state_getStorage`). Nothing is asked for
+a height above the core's `stop` (or the height before an upgrade boundary) the process will not process. With `core-ledger-state`, `midnight_ledgerStateRoot` is asked only at the
 heights whose root it compares (see [The ledger root check](#the-ledger-root-check)): at the default interval, 17 of
 the 10,001 heights of a sync from genesis to 10,000. The runtime that built a block is named in its header (its `MNSV` digest),
 so `state_getRuntimeVersion` is asked only at the first block of each runtime version the process sees (twice at a

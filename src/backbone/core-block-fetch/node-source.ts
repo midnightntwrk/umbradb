@@ -10,8 +10,9 @@
  * have been lost. A head header's hash is computed from the header (`./header.ts`), since notifications carry none.
  *
  * **Finality conflicts.** A finalized notification can carry a hash that differs from the finalized hash the source
- * knows at its height: the head's, one read by `chain_getBlockHash`, or, at or below the loop's cursor, the database's
- * (`QueueRunner.storedHash`). That fails the source with `finality-conflict`, because a finalized block never changes.
+ * knows at its height: the head's, a notified head's parent's, one read by `chain_getBlockHash` or taken from a queued
+ * block's parent link, or, at or below the loop's cursor, the database's (`QueueRunner.storedHash`). A notified head's
+ * parent hash, and a hash read or derived for a height, are checked the same way before they are kept. That fails the source with `finality-conflict`, because a finalized block never changes.
  * The failure rejects the loop's next call, so processing halts with that code. Before the loop runs (startup), a
  * notification at or below the cursor is compared only with what the source knows, because the startup checks already
  * compare the cursor's hash with the node's.
@@ -22,9 +23,20 @@
  * - the head the loop last read (`finalizedHead`), so that the head's `on-finalized` comes before any of its heights'
  *   `on-fetch`.
  *
+ * - the last height the loop processes in its run (`QueueRunner.lastHeight`: the core's stop, or the height before an
+ *   upgrade boundary), so nothing is asked of the node for a height the run will not process.
+ *
  * It never fetches or holds more than `prefetchWindow` heights above the cursor, and prepares `concurrency` of them at a
- * time. For each height it reads `chain_getBlockHash` (the finalized hash), then takes the queued block of that hash if
- * there is one, or else runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner (`QueueRunner.prepare`).
+ * time. For each height it takes the finalized hash, then takes the queued block of that hash if there is one, or else
+ * runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner (`QueueRunner.prepare`).
+ *
+ * **The finalized hash of a height.** While the loop follows the head (the head no more than `prefetchWindow` above
+ * the cursor), the source takes it without a node call when it knows it: each finalized notification and each head read
+ * gives the head's hash and its parent's (the header's `parentHash`), so with one-step finality every height's hash is
+ * known; after a jump, a height below a known one is derived through the queued best blocks' parent links (the queued
+ * block with the known hash names its parent's). Only a height still unknown is read with `chain_getBlockHash`. During a
+ * catch-up (the head farther above the cursor) every height is read with `chain_getBlockHash`, as before. The hashes
+ * known are kept from the cursor's height up, so they never outgrow the heights between the cursor and the head.
  *
  * The loop takes each prepared height (`prepared`) in order, so every height is still committed in its own
  * transaction. A queued block at the height with another hash is dropped, with everything queued above it
@@ -45,8 +57,8 @@
  * condition `finality-stall`.
  *
  * A best block is queued only while the loop follows the head, that is, while the head is no more than
- * `prefetchWindow` above the cursor. During a catch-up the prefetch serves those heights, and the queue would hold
- * blocks far above the window.
+ * `prefetchWindow` above the cursor, and only at or below the run's last height (`QueueRunner.lastHeight`). During a
+ * catch-up the prefetch serves those heights, and the queue would hold blocks far above the window.
  *
  * When the finalized head rises to a height where the queue holds another hash, the queued blocks from there on are
  * dropped (`on-rollback`). Every queue change, including the prefetch taking a queued block, runs one at a time.
@@ -201,7 +213,10 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   readonly #early: NodeHeader[] = [];
   readonly #waits = new Set<HeadWait>();
   readonly #subscriptions: NodeSubscription[] = [];
-  /** The finalized hashes read by height (`chain_getBlockHash`) above the cursor, for the finality check. */
+  /**
+   * The finalized hashes known by height from the cursor's up: notified heads and their parents, hashes read
+   * (`chain_getBlockHash`) or derived through queued blocks; for the finality check and the prefetch.
+   */
   readonly #finalized = new Map<bigint, Uint8Array>();
   /**
    * The first failure (a finality conflict, a finalized subscription's error, the close): every later call rejects
@@ -566,6 +581,8 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     if (head === undefined || block.height > head.height) {
       this.#head = block;
       this.#finalized.set(block.height, block.hash);
+      // The head's parent is finalized too: known, checked like any finalized hash learned (`#learned`).
+      if (block.height > 0n) this.#learned({ height: block.height - 1n, hash: block.parentHash, parentHash: new Uint8Array(0) }, "the parent hash of the finalized head notified above it");
       for (const wait of [...this.#waits]) if (block.height > wait.above) wait.resolve();
       this.#queued((runner) => this.#dropFrom(runner, block)).catch(() => undefined);
       return;
@@ -585,10 +602,59 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     );
   }
 
-  #conflict(block: BlockRef, known: Uint8Array, what: string): UmbraError {
+  /**
+   * A finalized hash learned for a height other than by its notification (a head's parent, a read, a derivation): kept
+   * from the cursor's height up, checked against the hash known there, or, at or below the cursor, the database's.
+   * A difference fails the source with `finality-conflict`.
+   */
+  #learned(block: BlockRef, what: string): void {
+    const known = this.#finalized.get(block.height);
+    if (known !== undefined) {
+      if (!sameBytes(known, block.hash)) this.#fail(this.#conflict(block, known, "the finalized hash known there", what));
+      return;
+    }
+    const cursor = this.#cursor;
+    const runner = this.#runner;
+    if (cursor === null || block.height >= cursor) this.#finalized.set(block.height, block.hash);
+    if (runner === undefined || cursor === null || block.height > cursor) return;
+    runner.storedHash(block.height).then(
+      (stored) => {
+        if (stored !== null && !sameBytes(stored, block.hash)) this.#fail(this.#conflict(block, stored, "the database's block", what));
+      },
+      () => undefined,
+    );
+  }
+
+  /**
+   * The finalized hash of `height` without a node call (see the module comment), while the loop follows the head:
+   * known, or derived from the nearest known hash above it through the queued blocks' parent links; else undefined.
+   */
+  #knownFinalized(height: bigint): Uint8Array | undefined {
+    const head = this.#head;
+    const cursor = this.#cursor;
+    if (head === undefined || cursor === null || head.height - cursor > BigInt(this.#window)) return undefined;
+    const known = this.#finalized.get(height);
+    if (known !== undefined) return known;
+    let above = height + 1n;
+    while (above <= head.height && !this.#finalized.has(above)) above += 1n;
+    const top = this.#finalized.get(above);
+    if (top === undefined) return undefined;
+    let hash: Uint8Array = top;
+    for (let at = above; at > height; at--) {
+      const step: Uint8Array = hash;
+      const queued: QueuedBlock | undefined = this.#queue.find((entry) => entry.block.height === at && sameBytes(entry.block.hash, step));
+      if (queued === undefined) return undefined;
+      hash = queued.block.parentHash;
+      this.#learned({ height: at - 1n, hash, parentHash: new Uint8Array(0) }, "the parent hash of a queued block with the finalized hash above it");
+    }
+    return this.#failure === undefined ? hash : undefined;
+  }
+
+  #conflict(block: BlockRef, known: Uint8Array, what: string, learned?: string): UmbraError {
     return new UmbraError(
       "finality-conflict",
-      `the node reported the finalized block ${hexOf(block.hash)} at height ${block.height}, but ${what} is ` +
+      `the node reported the finalized block ${hexOf(block.hash)} at height ${block.height}` +
+        `${learned === undefined ? "" : ` (${learned})`}, but ${what} is ` +
         `${hexOf(known)}: a finalized block never changes; processing halts`,
       { height: block.height, hash: hexOf(block.hash), stored: hexOf(known) },
     );
@@ -635,7 +701,9 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   #fill(): void {
     const announced = this.#announced;
     if (this.#runner === undefined || this.#cursor === null || announced === null || this.#failure !== undefined) return;
-    const end = this.windowEnd(this.#cursor, announced);
+    const last = this.#runner.lastHeight ?? null;
+    const window = this.windowEnd(this.#cursor, announced);
+    const end = last !== null && last < window ? last : window;
     for (let height = this.#cursor + 1n; height <= end; height++) if (!this.#prefetch.has(height)) this.#begin(height);
   }
 
@@ -686,13 +754,17 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     let hash: Uint8Array;
     let queued: PreparedBlock | undefined;
     try {
-      hash = await this.#slot(async () => {
-        live();
-        const read = await this.client.blockHash(height);
-        live();
-        return read;
-      });
-      this.#finalized.set(height, hash);
+      const known = this.#knownFinalized(height);
+      hash =
+        known ??
+        (await this.#slot(async () => {
+          live();
+          const read = await this.client.blockHash(height);
+          live();
+          return read;
+        }));
+      if (known === undefined) this.#learned({ height, hash, parentHash: new Uint8Array(0) }, "the finalized hash read there");
+      this.#throwFailure();
       await below;
       queued = await this.#queued((current) => this.#take(current, height, hash), runner);
     } finally {
@@ -797,6 +869,9 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     const cursor = this.#cursor;
     const height = header.number;
     if (head === undefined || cursor === null || height <= head.height || height <= cursor) return;
+    // Nothing above the run's last height (the core's stop, or before an upgrade boundary) is fetched.
+    const last = runner.lastHeight ?? null;
+    if (last !== null && height > last) return;
     // Queued only while the loop follows the head, not during a catch-up.
     if (head.height - cursor > BigInt(this.#window)) return;
     if (this.#best === null || height > this.#best) this.#best = height;

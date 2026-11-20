@@ -7,7 +7,7 @@ import type { MetadataBlock, RuntimeMetadataEntry } from "../../src/ledger/metad
 import { ledgerTableOf } from "../../src/ledger/networks.js";
 import { type ConnectSocket, connectWebSocket, NodeClient } from "../../src/node/index.js";
 import { BlockItems } from "../../src/runner/block-context.js";
-import type { BlockRef, QueueRunner } from "../../src/runner/block-source.js";
+import type { BlockRef, PreparedBlock, QueueRunner } from "../../src/runner/block-source.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import {
   branchOf,
@@ -406,8 +406,10 @@ describe("the finalized prefetch", () => {
     expect(runner.calls).toHaveLength(100);
     expect(new Set(runner.calls).size).toBe(100);
     expect(runner.maxInFlight).toBeLessThanOrEqual(3);
-    // One chain_getBlockHash and one chain_getBlock a height, no more.
-    expect(node.count("chain_getBlockHash")).toBe(100);
+    // One chain_getBlockHash and one chain_getBlock a height, no more; the head's hash (100) is known from the head read
+    // once the loop follows it, so it is not asked (99 is asked: the prefetch began it at cursor 91, still catching up).
+    expect(node.count("chain_getBlockHash")).toBe(99);
+    expect(node.count("chain_getBlockHash", [100])).toBe(0);
     expect(node.count("chain_getBlock")).toBe(100);
   }, PATIENCE_MS * 2);
 
@@ -436,7 +438,16 @@ describe("the finalized prefetch", () => {
   }, PATIENCE_MS);
 
   it("prefetches only up to the head the loop last read, so its on-finalized comes first", async () => {
-    const records: TapeRecord[] = [...catchUp(10), finalizedHead(at(12)), ...hashAndBlock(at(11)), ...hashAndBlock(at(12))];
+    // Following from the start (the head 10 within the window): 10 and its parent 9 are known from the head read, 12 and
+    // 11 from the notification, so only 1–8 are asked by height.
+    const records: TapeRecord[] = [
+      ...subscriptions(),
+      ...headRead(at(10)),
+      ...chain.slice(1, 9).flatMap(hashAndBlock),
+      ...[9, 10].map((h): TapeRecord => ({ method: "chain_getBlock", params: [at(h).hex], result: at(h).block })),
+      finalizedHead(at(12)),
+      ...[11, 12].map((h): TapeRecord => ({ method: "chain_getBlock", params: [at(h).hex], result: at(h).block })),
+    ];
     const { source, node } = await open(records, { prefetchWindow: 64 });
     const runner = new Recorder();
     source.attach(runner);
@@ -444,11 +455,12 @@ describe("the finalized prefetch", () => {
     for (let height = 1n; height <= 10n; height++) await source.prepared(height);
     // The head rose to 12 meanwhile; the loop has not read it: nothing above 10 asked.
     await source.waitForHead(11n, never);
-    expect(node.count("chain_getBlockHash", [11])).toBe(0);
+    expect(node.count("chain_getBlock", [at(11).hex])).toBe(0);
     expect((await source.finalizedHead()).height).toBe(12n);
     await source.prepared(11n);
     await source.prepared(12n);
-    expect(node.count("chain_getBlockHash", [12])).toBe(1);
+    expect(node.count("chain_getBlock", [at(12).hex])).toBe(1);
+    expect(node.count("chain_getBlockHash", [12]) + node.count("chain_getBlockHash", [11])).toBe(0);
   }, PATIENCE_MS);
 
   it("bounds the prefetch by the head the loop read, not by one a notification raised meanwhile", async () => {
@@ -466,11 +478,11 @@ describe("the finalized prefetch", () => {
     for (let height = 1n; height <= 5n; height++) await source.prepared(height);
     await source.waitForHead(11n, never);
     for (let height = 6n; height <= 10n; height++) await source.prepared(height);
-    expect(node.count("chain_getBlockHash", [11]) + node.count("chain_getBlockHash", [12])).toBe(0);
+    expect(node.count("chain_getBlock", [at(11).hex]) + node.count("chain_getBlock", [at(12).hex])).toBe(0);
     expect((await source.finalizedHead()).height).toBe(12n);
     await source.prepared(11n);
     await source.prepared(12n);
-    expect(node.count("chain_getBlockHash", [11])).toBe(1);
+    expect(node.count("chain_getBlock", [at(11).hex])).toBe(1);
   }, PATIENCE_MS);
 
   it("reports its latest head with no node call, the prefetch still bound by the head the loop read", async () => {
@@ -495,11 +507,11 @@ describe("the finalized prefetch", () => {
     expect(source.latestHead()?.height).toBe(12n);
     // The prefetch stays bound by the head the loop read (10), so 12's on-finalized still comes before 11 and 12.
     for (let height = 6n; height <= 10n; height++) await source.prepared(height);
-    expect(node.count("chain_getBlockHash", [11]) + node.count("chain_getBlockHash", [12])).toBe(0);
+    expect(node.count("chain_getBlock", [at(11).hex]) + node.count("chain_getBlock", [at(12).hex])).toBe(0);
     expect((await source.finalizedHead()).height).toBe(12n);
     await source.prepared(11n);
     await source.prepared(12n);
-    expect(node.count("chain_getBlockHash", [11])).toBe(1);
+    expect(node.count("chain_getBlock", [at(11).hex])).toBe(1);
     expect(source.latestHead()?.height).toBe(12n);
     // No node call for any of the reads: the node saw the source's first use, then the heights' hashes and blocks only.
     // Every request sent before the last height's was received before it was answered, on the one connection.
@@ -579,8 +591,9 @@ describe("the finalized prefetch", () => {
     source.attach(new Recorder());
     await source.prepared(1n);
     await sleep(200);
-    expect(node.count("chain_getBlockHash", [1])).toBe(2);
-    expect(node.count("chain_getBlockHash", [2])).toBe(1);
+    // Its hash is the one the first run read (kept from the cursor up), so the new run asks only for its block.
+    expect(node.count("chain_getBlock", [at(1).hex])).toBe(2);
+    expect(node.count("chain_getBlock", [at(2).hex])).toBe(1);
   }, PATIENCE_MS);
 
   it("drops a height whose answer comes after the run ended, running none of its points", async () => {
@@ -780,8 +793,8 @@ describe("the best-block queue", () => {
       fetched(A(101)),
       newHead(B(101)),
       fetched(B(101)),
+      // 101's hash is the notification's: no chain_getBlockHash (FR-011).
       finalizedHead(A(101)),
-      { method: "chain_getBlockHash", params: [101], result: A(101).hex },
       newHead(A(102)),
       fetched(A(102)),
     ];
@@ -1158,6 +1171,133 @@ describe("the best-block queue", () => {
     expect(roots()).toBe(0);
     await source.ledgerStateRoot({ height: 101n, hash: A(101).hash, parentHash: head.hash });
     expect(roots()).toBe(1);
+  }, PATIENCE_MS);
+});
+
+describe("the finalized hashes at the tip (node call budget, FR-011–FR-014, task 4.4)", () => {
+  const head = at(100);
+  const a = branchOf(head, 110n, "t");
+  const A = (h: number) => a[h - 101] as ChainBlock;
+  const fetched = (block: ChainBlock): TapeRecord => ({ method: "chain_getBlock", params: [block.hex], result: block.block });
+  const hashOf = (block: ChainBlock): TapeRecord => ({ method: "chain_getBlockHash", params: [Number(block.height)], result: block.hex });
+  const blockHashCalls = (node: TapeNode): number[] =>
+    node.calls.filter((c) => c.method === "chain_getBlockHash").map((c) => (c.params as number[])[0] as number);
+
+  /** A source following at cursor 100 = head 100 with `records` after its opening, its runner `runner`. */
+  async function following(records: readonly TapeRecord[], runner = new Recorder(), options: { readonly prefetchWindow?: number } = {}) {
+    const opened = await open([...subscriptions(), ...headRead(head), ...records], options);
+    await opened.source.cursor(cursorRead(head));
+    opened.source.attach(runner);
+    await opened.source.finalizedHead();
+    return { ...opened, runner };
+  }
+
+  /** The loop's work up to `last`: each height once the head passed it, prepared in order. */
+  async function loopTo(source: NodeBlockSource, from: bigint, last: bigint): Promise<PreparedBlock[]> {
+    const prepared: PreparedBlock[] = [];
+    for (let height = from; height <= last; height++) {
+      await source.waitForHead(height - 1n, never);
+      await source.finalizedHead();
+      prepared.push(await source.prepared(height));
+    }
+    return prepared;
+  }
+
+  it("takes each height's hash from one-step finalized notifications: no chain_getBlockHash", async () => {
+    const records = [101, 102, 103, 104, 105, 106, 107, 108, 109, 110].flatMap((h) => [finalizedHead(A(h)), fetched(A(h))]);
+    const { source, node } = await following(records);
+    const prepared = await loopTo(source, 101n, 110n);
+    expect(prepared.map((p) => hex(p.block.hash))).toEqual([101, 102, 103, 104, 105, 106, 107, 108, 109, 110].map((h) => A(h).hex));
+    expect(blockHashCalls(node)).toEqual([]);
+    expect(node.count("chain_getBlock")).toBe(10);
+  }, PATIENCE_MS);
+
+  it("after a jump of k asks only the heights it cannot derive: the notified head's parent is known", async () => {
+    // 100 → 105: 105 and its parent 104 known; 101–103 asked.
+    const records = [finalizedHead(A(105)), ...[101, 102, 103].map((h) => hashOf(A(h))), ...[101, 102, 103, 104, 105].map((h) => fetched(A(h)))];
+    const { source, node } = await following(records);
+    await loopTo(source, 101n, 105n);
+    expect(blockHashCalls(node).sort()).toEqual([101, 102, 103]);
+  }, PATIENCE_MS);
+
+  it("derives every height of a jump from the queued best blocks' parent links, asking nothing", async () => {
+    const records = [...[101, 102, 103, 104, 105].flatMap((h) => [newHead(A(h)), fetched(A(h))]), finalizedHead(A(105))];
+    const { source, node, runner } = await following(records);
+    await until(() => runner.calls.includes("prepare 105"), "the five best blocks queued");
+    await source.idle();
+    const prepared = await loopTo(source, 101n, 105n);
+    expect(prepared.map((p) => hex(p.block.hash))).toEqual([101, 102, 103, 104, 105].map((h) => A(h).hex));
+    expect(blockHashCalls(node)).toEqual([]);
+    // Each block fetched once, as a best block.
+    expect([101, 102, 103, 104, 105].map((h) => node.count("chain_getBlock", [A(h).hex]))).toEqual([1, 1, 1, 1, 1]);
+  }, PATIENCE_MS);
+
+  it("after a reconnect reads the head again and asks only the heights below its parent", async () => {
+    const records: TapeRecord[] = [
+      { disconnect: true },
+      ...subscriptions(),
+      ...headRead(A(104)),
+      hashOf(A(101)),
+      hashOf(A(102)),
+      ...[101, 102, 103, 104].map((h) => fetched(A(h))),
+    ];
+    const { source, node } = await following(records);
+    await loopTo(source, 101n, 104n);
+    expect(blockHashCalls(node).sort()).toEqual([101, 102]);
+  }, PATIENCE_MS);
+
+  it("fails with finality-conflict when a notified head's parent differs from the finalized hash known there", async () => {
+    // A block at 101 whose parent is not the head 100 the source read.
+    const other = branchOf(at(99), 101n, "x");
+    const { source, client } = await open([...subscriptions(), ...headRead(head), FENCE, finalizedHead(other[1] as ChainBlock)]);
+    await source.cursor(cursorRead(head));
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    await passFence(client);
+    let error: unknown;
+    await until(() => {
+      void source.finalizedHead().catch((failure: unknown) => (error = failure));
+      return error !== undefined;
+    }, "the conflict");
+    expect(error).toMatchObject({ code: "finality-conflict", details: { height: 100n, hash: (other[0] as ChainBlock).hex, stored: head.hex } });
+    expect((error as Error).message).toMatch(/the parent hash of the finalized head notified above it/);
+  }, PATIENCE_MS);
+
+  it("asks chain_getBlockHash per height while it catches up, as before", async () => {
+    // The head 100, the cursor 0, the window 8: every height of 1–20 asked by its height.
+    const records = chain.slice(1, 21).flatMap((block) => hashAndBlock(block));
+    const opened = await open([...subscriptions(), ...headRead(head), ...records], { prefetchWindow: 8 });
+    opened.source.attach(new Recorder());
+    await opened.source.finalizedHead();
+    for (let height = 1n; height <= 20n; height++) await opened.source.prepared(height);
+    // 1–20 prepared, each asked by its height once (and the prefetch's window above them, up to 27, asked the same way).
+    const asked = blockHashCalls(opened.node).sort((x, y) => x - y);
+    expect(asked.filter((h) => h <= 20)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    expect(asked.every((h) => h <= 27) && new Set(asked).size === asked.length).toBe(true);
+  }, PATIENCE_MS);
+
+  it("asks the node nothing above the run's last height (the core's stop): no hash, block or best block above it", async () => {
+    // The cursor 90, the head 110, the run's last height 99 (stop: 99), the window 64: nothing of 100–110 is asked.
+    // The best blocks 111 and 112 are announced right after the head read, above the last height.
+    const records: TapeRecord[] = [newHead(at(111)), newHead(at(112)), ...chain.slice(91, 111).flatMap((block) => hashAndBlock(block))];
+    const opened = await open([...subscriptions(), ...headRead(at(110)), ...records], { prefetchWindow: 64 });
+    await opened.source.cursor(cursorRead(at(90)));
+    const runner = Object.assign(new Recorder(), { lastHeight: 99n });
+    opened.source.attach(runner);
+    await opened.source.finalizedHead();
+    for (let height = 91n; height <= 99n; height++) await opened.source.prepared(height);
+    await sleep(100);
+    await opened.source.idle();
+    const heightOf = new Map(chain.map((block) => [block.hex, block.height] as const));
+    const above = opened.node.calls.filter((call) => {
+      // The head read at startup names the head, which is no fetch.
+      if (call.method === "chain_getHeader") return false;
+      const first = (call.params as unknown[] | undefined)?.[0];
+      const height = typeof first === "number" ? BigInt(first) : typeof first === "string" ? heightOf.get(first) : undefined;
+      return height !== undefined && height > 99n;
+    });
+    expect(above.map((call) => `${call.method} ${JSON.stringify(call.params)}`)).toEqual([]);
+    expect(runner.calls.filter((call) => call.startsWith("best"))).toEqual([]);
   }, PATIENCE_MS);
 });
 

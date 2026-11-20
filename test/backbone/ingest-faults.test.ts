@@ -105,12 +105,12 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  const chain = chainOf(4n);
+  const chain = chainOf(5n);
   /**
    * The chain of the runtime case: height 3 is the first block of another runtime (2_001_100, also v9 on preprod), so
    * its runtime is read at its parent's state, while 2's version was confirmed at 1 (`src/ledger/metadata.ts`).
    */
-  const upgraded = chainOf(4n, (h) => (h >= 3n ? { specVersion: 2_001_100 } : {}));
+  const upgraded = chainOf(5n, (h) => (h >= 3n ? { specVersion: 2_001_100 } : {}));
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
   /** Block `height` of the chain the case `failing` runs on. */
   const on = (failing: "events" | "runtime" | "block") => (height: number): ChainBlock =>
@@ -119,25 +119,26 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
   /** The first two finalized heights, then height 3's records up to the one `failing` answers in its place. */
   function a84Tape(failing: "events" | "runtime" | "block"): TapeRecord[] {
     const at = on(failing);
+    // The head read names the head's hash and its parent's (FR-011): with the head at 3, 2 and 3 are known. The block
+    // case reads the head at 5, so that 3 is asked by height and the node answers that it has no such block.
     const records: TapeRecord[] = [
-      ...opening(at(0), at(3)),
+      ...opening(at(0), at(failing === "block" ? 5 : 3)),
       ...finalized(at(1), RUNTIME_2_0, true),
       eventsRead(at(1), null),
-      ...finalized(at(2), RUNTIME_2_0),
+      ...(failing === "block" ? finalized(at(2), RUNTIME_2_0) : content(at(2), RUNTIME_2_0, false)),
       eventsRead(at(2), null),
     ];
     if (failing === "block") return [...records, { method: "chain_getBlockHash", params: [3], result: null }];
     if (failing === "runtime") {
       return [
         ...records,
-        { method: "chain_getBlockHash", params: [3], result: at(3).hex },
         { method: "chain_getBlock", params: [at(3).hex], result: at(3).block },
         { method: "state_getRuntimeVersion", params: [at(2).hex], error: discarded(at(2)) },
       ];
     }
     return [
       ...records,
-      ...finalized(at(3), RUNTIME_2_0),
+      ...content(at(3), RUNTIME_2_0, false),
       { method: "state_getStorage", params: [SYSTEM_EVENTS_STORAGE, at(3).hex], error: discarded(at(3)) },
     ];
   }
@@ -197,25 +198,25 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
     const db = await backend.database();
     // The node's rate limit: retryable on the finalized path, which would ask again; a best block's call is not retried.
     const limited = { code: -32999, message: "RPC rate limit exceeded" };
+    // Every hash here is known from the head read (2 and its parent 1) or the notification of 3 (FR-011): only blocks
+    // are asked.
     const records: TapeRecord[] = [
       ...opening(at(0), at(2)),
-      ...finalized(at(1), RUNTIME, true),
-      ...finalized(at(2)),
+      ...content(at(1), RUNTIME, true),
+      ...content(at(2), RUNTIME, false),
       newHead(at(3)),
       { method: "chain_getBlock", params: [at(3).hex], error: limited },
       finalizedHead(at(3)),
-      ...finalized(at(3)),
+      ...content(at(3), RUNTIME, false),
     ];
     const run = await ingest(db, records, { start: 1n });
     try {
       await committed(run, 3n);
       const fetches = run.node.calls.filter((c) => c.method === "chain_getBlock" && JSON.stringify(c.params) === JSON.stringify([at(3).hex]));
-      // The best block's one call (its error, not retried), then the finalized height's own.
+      // The best block's one call (its error, not retried), then the finalized height's own, its hash the notification's.
       expect(fetches).toHaveLength(2);
-      const hashReads = run.node.calls.findIndex((c) => c.method === "chain_getBlockHash" && JSON.stringify(c.params) === "[3]");
-      const second = run.node.calls.indexOf(fetches[1] as (typeof run.node.calls)[number]);
-      expect(hashReads).toBeGreaterThan(run.node.calls.indexOf(fetches[0] as (typeof run.node.calls)[number]));
-      expect(second).toBeGreaterThan(hashReads);
+      expect(run.node.count("chain_getBlockHash", [3])).toBe(0);
+      expect(run.node.calls.indexOf(fetches[1] as (typeof run.node.calls)[number])).toBeGreaterThan(run.node.calls.indexOf(fetches[0] as (typeof run.node.calls)[number]));
       // on-best-block fired for 3, which was then not queued: no on-rollback, 3 committed once.
       expect(run.seen.queue.filter((line) => line.startsWith("best 3 "))).toHaveLength(1);
       expect(run.seen.rollbacks).toEqual([]);
@@ -275,15 +276,19 @@ const OUTAGE_BACKOFF = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_0
 function outageTape(chain: readonly ChainBlock[]): TapeRecord[] {
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
   const heights = (from: number, to: number): number[] => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  // A head read names its height's hash and its parent's, known to the source following the head (FR-011): 9 and 10,
+  // then 19 and 20, are asked for their content only.
   return [
     ...opening(at(0), at(10)),
-    ...heights(1, 10).flatMap((h) => finalized(at(h), RUNTIME, h === 1)),
+    ...heights(1, 8).flatMap((h) => finalized(at(h), RUNTIME, h === 1)),
+    ...heights(9, 10).flatMap((h) => content(at(h), RUNTIME, false)),
     { disconnect: true },
     ...Array.from({ length: REFUSED_SESSIONS }, () => ({ disconnect: true }) as const),
     // The node is back: the subscriptions made again, the head read again (20).
     ...subscriptions(),
     ...headRead(at(20)),
-    ...heights(11, 20).flatMap((h) => finalized(at(h))),
+    ...heights(11, 18).flatMap((h) => finalized(at(h))),
+    ...heights(19, 20).flatMap((h) => content(at(h), RUNTIME, false)),
   ];
 }
 

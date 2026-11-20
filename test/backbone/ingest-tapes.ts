@@ -3,6 +3,7 @@ import {
   blockRef,
   type ChainBlock,
   chainOf,
+  content,
   finalized,
   finalizedHead,
   headRead,
@@ -34,6 +35,8 @@ import type { Decoded } from "./ingest-checks.js";
 export function a79Tape(chain: readonly ChainBlock[]): TapeRecord[] {
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
   const heights = (from: number, to: number): number[] => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  // A head read or a finalized notification names its height's hash and its parent's: those heights are known to the
+  // source following the head, so only their content is asked (FR-011); the others are asked by height.
   return [
     ...blockRef(at(0)),
     ...subscriptions(),
@@ -41,17 +44,19 @@ export function a79Tape(chain: readonly ChainBlock[]): TapeRecord[] {
     finalizedHead(at(10)),
     finalizedHead(at(13)),
     ...finalized(at(11), RUNTIME, true),
-    ...finalized(at(12)),
-    ...finalized(at(13)),
+    ...content(at(12), RUNTIME, false),
+    ...content(at(13), RUNTIME, false),
     finalizedHead(at(13)),
     finalizedHead(at(12)),
     { disconnect: true },
     // The client connects again and makes both subscriptions again; the source reads the head again.
     ...subscriptions(),
     ...headRead(at(16)),
-    ...heights(14, 16).flatMap((h) => finalized(at(h))),
+    ...finalized(at(14)),
+    ...heights(15, 16).flatMap((h) => content(at(h), RUNTIME, false)),
     finalizedHead(at(20)),
-    ...heights(17, 20).flatMap((h) => finalized(at(h))),
+    ...heights(17, 18).flatMap((h) => finalized(at(h))),
+    ...heights(19, 20).flatMap((h) => content(at(h), RUNTIME, false)),
   ];
 }
 

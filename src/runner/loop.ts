@@ -1300,6 +1300,7 @@ export class FinalizedLoop {
     const header = (block: BlockRef): BlockRef =>
       Object.freeze({ height: block.height, hash: block.hash, parentHash: block.parentHash });
     return Object.freeze({
+      lastHeight: this.lastHeight(),
       prepare: async (block: BlockRef) => {
         const run: HeightRun = {
           height: block.height,
