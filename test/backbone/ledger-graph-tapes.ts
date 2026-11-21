@@ -160,6 +160,9 @@ export function recordingWorker(host: LedgerHost, record: WorkerRecord): LedgerH
     get restarts() {
       return host.restarts;
     },
+    get memoryBytes() {
+      return host.memoryBytes;
+    },
     activity: () => host.activity(),
     bridge: () => host.bridge(),
     get failure() {

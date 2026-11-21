@@ -71,6 +71,9 @@ function keepingFlushes(flushes: Map<bigint, NodeBatch>): (host: LedgerHost) => 
     get restarts() {
       return host.restarts;
     },
+    get memoryBytes() {
+      return host.memoryBytes;
+    },
     activity: () => host.activity(),
     bridge: () => host.bridge(),
     get failure() {

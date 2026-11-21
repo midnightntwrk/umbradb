@@ -144,6 +144,23 @@ describe("the ledger worker's restart", () => {
     expect(host.failure).toBeNull();
   });
 
+  it("reports its thread's memory outside its JavaScript heap: a number once the thread answered, its loaded package's memory among it; none on a new thread until it answers; none on the main thread's engine", { timeout: LONG }, async () => {
+    const host = started();
+    expect(host.memoryBytes).toBeNull();
+    const genesis = await host.genesis(genesisInput(), reader(new Map()));
+    expect(genesis.stateRoot.length).toBeGreaterThan(0);
+    // The loaded v9 package's WebAssembly memory is counted: far more than an empty thread holds.
+    const loaded = host.memoryBytes;
+    expect(loaded).toBeGreaterThan(16 * 1024 ** 2);
+    await host.restart();
+    expect(host.memoryBytes).toBeNull();
+    // The new thread loaded no package yet: its first answer reports less than the old one's.
+    await host.probe();
+    expect(host.memoryBytes).toBeGreaterThan(0);
+    expect(host.memoryBytes).toBeLessThan(loaded as number);
+    expect(inThreadLedger().memoryBytes).toBeNull();
+  });
+
   it("is refused once the worker failed or was closed", { timeout: LONG }, async () => {
     const failed = started({ exitAt: "1" });
     await failed.genesis(genesisInput(), reader(new Map()));

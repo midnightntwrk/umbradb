@@ -73,6 +73,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A long sync no longer halts with `RuntimeError: unreachable` when the ledger worker's WebAssembly memory reaches the
+  4 GiB a 32-bit package can address (Midnight mainnet from genesis, at block 2,947,480 after 872,416 blocks in one
+  worker thread). Every worker answer reports its thread's memory (`LedgerHost.memoryBytes`), and `core-ledger-state`
+  ends the worker thread and starts a new one at a block's settle once it reaches 2 GiB, as after a refused eviction:
+  the block commits as computed and the next one loads the state from the database. At most once per 1,000 blocks
+  unless the memory reaches 3 GiB; each restart is logged and traced (`memoryRestart`).
+
 - A backup or restore of a database whose ledger state holds more than 2^24 node keys (stored and embedded; Preprod
   at height 3.5 million) no longer fails with `RangeError: Set maximum size exceeded`: the contents hash of
   `core-ledger-state`'s node tables holds the keys in sets sharded by their first byte and hashes the node set key by

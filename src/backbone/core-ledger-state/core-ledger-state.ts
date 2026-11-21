@@ -141,6 +141,19 @@
  * computed again, and the engine tells the worker's host it committed, so the worker commits the state it holds
  * pending; one that did not is made again from `on-compute`, as after a rollback.
  *
+ * **The worker's memory** ({@link restartOverMemoryLimit}). A ledger package's WebAssembly memory never shrinks, and a
+ * 32-bit package aborts (`RuntimeError: unreachable`) when it would pass 4 GiB. The worker keeps the state it holds from
+ * block to block, and every node a block loads stays loaded while the state still contains it, so on a long sync the
+ * memory only grows: Midnight mainnet's sync from genesis trapped at block 2,947,480 with 4.6 GB in the process. At the
+ * same point as the refused eviction's restart, after the eviction of the run's last block and before its `COMMIT`,
+ * when the worker's memory as its last answer reported it (`LedgerHost.memoryBytes`) has reached
+ * {@link LEDGER_MEMORY_LIMIT_BYTES}, the worker thread is ended and a new one started, and the next block loads the
+ * state after the run from the database, as after a refusal. At most once in {@link LEDGER_MEMORY_RESTART_SPAN} blocks,
+ * so a thread whose memory is over the limit as soon as it has loaded the state does not restart at every block, unless
+ * the memory has reached {@link LEDGER_MEMORY_HARD_LIMIT_BYTES}. A new thread loads what it needs again, so a restart
+ * slows the blocks after it for a while; what is stored is what a process restarted at that height stores. Each
+ * restart is logged ({@link LedgerBinding.log}) and counted in the block trace (`memoryRestart`).
+ *
  * **The keys found stored** ({@link knownKeysOf}, `./stored-keys.ts`). For each process context, the keys the
  * computation's `missing` read found stored, from one settle to the next, so that a block's references are asked about
  * only when no earlier settle found them stored. They are used only while each block continues the one before
@@ -270,7 +283,29 @@ export interface RetainedStates {
 export interface LedgerBinding {
   readonly ledger: LedgerHost;
   readonly source: BlockLedgerSource;
+  /** Where a restart of the worker on its memory limit is reported ({@link restartOverMemoryLimit}); nowhere unless given. */
+  readonly log?: (line: string) => void;
 }
+
+/**
+ * The worker's memory, in bytes, from which its thread is ended and a new one started after a run's eviction
+ * ({@link restartOverMemoryLimit}): 2 GiB, half of what a 32-bit ledger package can address, which leaves a block and
+ * the blocks of the span 2 GiB to grow by before the package aborts.
+ */
+export const LEDGER_MEMORY_LIMIT_BYTES = 2 * 1024 ** 3;
+
+/**
+ * The blocks between two restarts on the memory limit, at least, while the memory is below
+ * {@link LEDGER_MEMORY_HARD_LIMIT_BYTES}: a thread whose memory is over the limit as soon as it has loaded the state
+ * would otherwise restart at every block.
+ */
+export const LEDGER_MEMORY_RESTART_SPAN = 1_000n;
+
+/**
+ * The memory from which the worker is restarted whatever the span: 3 GiB. Between this and the 4 GiB at which a package
+ * aborts, a slow block beats a halted process.
+ */
+export const LEDGER_MEMORY_HARD_LIMIT_BYTES = 3 * 1024 ** 3;
 
 const BOUND = new WeakMap<ProcessContext, LedgerBinding>();
 
@@ -330,6 +365,15 @@ export interface CoreLedgerStateOptions {
    * run commits; true by default. False fails the run at the refusal.
    */
   readonly restartOnRefusedEviction?: boolean;
+  /**
+   * The worker's memory, in bytes, from which its thread is started anew after a run's eviction:
+   * {@link LEDGER_MEMORY_LIMIT_BYTES}; 0, never.
+   */
+  readonly memoryLimitBytes?: number;
+  /** The blocks between two restarts on the memory limit, at least: {@link LEDGER_MEMORY_RESTART_SPAN}. */
+  readonly memoryRestartSpan?: bigint;
+  /** The memory from which the span no longer holds a restart back: {@link LEDGER_MEMORY_HARD_LIMIT_BYTES}. */
+  readonly memoryHardLimitBytes?: number;
   /**
    * Whether each value `on-compute` takes from what it kept of the block before is also read from the database and
    * compared, and at every block every key kept of the retention window, a difference failing it with the height, the
@@ -917,6 +961,48 @@ export async function computeBlock(
   return { applied };
 }
 
+/** The height of each process context's last restart on the memory limit. */
+const MEMORY_RESTARTS = new WeakMap<ProcessContext, bigint>();
+
+/**
+ * Ends the ledger worker's thread and starts a new one at the settle of a run whose last block is `last`, `w` its block
+ * write handle, when the worker's memory (`LedgerHost.memoryBytes`) has reached the limit and either no restart on the
+ * limit came less than the span below `last` or the memory has reached the hard limit (see the module comment).
+ * Resolves with whether it did. Never with the limit at 0, nor for a worker that reports no memory.
+ */
+export async function restartOverMemoryLimit(
+  p: ProcessContext,
+  last: bigint,
+  w: Pick<BlockWriteHandle, "query">,
+  options: CoreLedgerStateOptions = {},
+): Promise<boolean> {
+  const { ledger, log } = boundLedger(p);
+  const limit = options.memoryLimitBytes ?? LEDGER_MEMORY_LIMIT_BYTES;
+  const bytes = ledger.memoryBytes;
+  // Also false for a worker that reports no number.
+  if (limit === 0 || bytes === null || !(bytes >= limit)) return false;
+  const hard = options.memoryHardLimitBytes ?? LEDGER_MEMORY_HARD_LIMIT_BYTES;
+  const span = options.memoryRestartSpan ?? LEDGER_MEMORY_RESTART_SPAN;
+  const previous = MEMORY_RESTARTS.get(p);
+  // A height below the last restart's is a height made again after a rollback: the span counts from the restart.
+  if (bytes < hard && previous !== undefined && last >= previous && last - previous < span) return false;
+  MEMORY_RESTARTS.set(p, last);
+  // As for a refused eviction: a later block's parse sent before and given no read may wait in the old thread for a
+  // stored node, and on PGlite a read of the database waits behind this open transaction.
+  const unlend = ledger.lend(w);
+  try {
+    await ledger.restart();
+  } finally {
+    await unlend();
+  }
+  const mib = (n: number): string => `${Math.round(n / 1024 ** 2)} MiB`;
+  log?.(
+    `ledger worker restarted after block ${last}: its thread held ${mib(bytes)} outside its JavaScript heap, at or over ` +
+      `its limit of ${mib(limit)}; the new thread loads the state after ${last} from the database`,
+  );
+  return true;
+}
+
 /**
  * `core-ledger-state`'s `on-settle` for the heights `run` (see the module comment), `w` the block write handle of the
  * transaction that holds the run's last block: the run record's computation over the node tables as `w` holds them,
@@ -928,7 +1014,8 @@ export async function computeBlock(
  *
  * When the package still refuses the eviction after the worker freed what it can (`EvictionRefused`), the worker
  * thread is ended and a new one started, and the net write goes on: the eviction is sent once per attempt of the height.
- * With `restartOnRefusedEviction: false` the refusal is thrown.
+ * With `restartOnRefusedEviction: false` the refusal is thrown. Otherwise, when the worker's memory has reached its
+ * limit, its thread is started anew at the same point ({@link restartOverMemoryLimit}).
  */
 export async function settleRun(
   p: ProcessContext,
@@ -979,6 +1066,7 @@ export async function settleRun(
         await unlend();
       }
     }
+    const overMemory = !refused && (await restartOverMemoryLimit(p, run.last, w, options));
     const netFrom = performance.now();
     await writeNet(options.refcountWriter?.(w, run.last) ?? w, outcome.net, {
       ...(options.refcountUnchecked === "row-count-mismatch" ? { unchecked: options.refcountUnchecked } : {}),
@@ -992,6 +1080,7 @@ export async function settleRun(
       traceAdd("stepMs", evictFrom - stepFrom);
       traceAdd("evictMs", netFrom - evictFrom);
       if (refused) traceMark("evictRefused", 1);
+      if (overMemory) traceMark("memoryRestart", 1);
       traceMark("knownHits", hits.count);
       if (afresh) traceMark("knownEmptied", 1);
       if (copy !== null) {

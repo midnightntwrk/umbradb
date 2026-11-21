@@ -124,6 +124,9 @@ function recordingHost(events: Event[]): (host: LedgerHost) => LedgerHost {
       get restarts() {
         return host.restarts;
       },
+      get memoryBytes() {
+        return host.memoryBytes;
+      },
       activity: () => host.activity(),
       bridge: () => host.bridge(),
       get failure() {

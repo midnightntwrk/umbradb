@@ -38,3 +38,15 @@ export function threadMemory(): ThreadMemory | null {
   }
   return { external: mib(report.external), heap: mib(report.heapUsed), rss: mib(report.rss) };
 }
+
+/**
+ * The bytes this thread holds outside its JavaScript heap now (`external` of the module comment, unrounded): in the
+ * ledger worker, its packages' WebAssembly memory to within a few MiB. Null where the runtime does not report it.
+ */
+export function threadExternalBytes(): number | null {
+  try {
+    return process.memoryUsage().external;
+  } catch {
+    return null;
+  }
+}

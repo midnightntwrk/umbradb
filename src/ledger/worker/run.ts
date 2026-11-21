@@ -19,6 +19,9 @@
  * A package that traps (a WebAssembly `RuntimeError`), in a request's work or in a ledger task, leaves its module in no
  * known state. The answer says so (`fatal`), nothing runs after it, and the host ends the thread.
  *
+ * Every answer carries the thread's memory outside its JavaScript heap (`memory`, `./protocol.ts`), which the host keeps
+ * (`LedgerHost.memoryBytes`) and `core-ledger-state` compares with its limit.
+ *
  * It runs only as a thread of its own, so it is out of coverage; what it runs, the engine and the bridge, is covered on
  * the main thread too.
  */
@@ -28,9 +31,16 @@ import type { LedgerName, LedgerPackage, LedgerPackageOptions } from "../types.j
 import { LedgerEngine, type LedgerLoader, type LedgerWorkerModule, ledgerTasksOf } from "./engine.js";
 import { posting, requestArrived, requestEnded, requestStarted, startWorkerTrace, traceClock } from "../../trace/worker-trace.js";
 import { bridgeStore } from "./node-bridge.js";
+import { threadExternalBytes } from "../../trace/memory.js";
 
 export type { LedgerWorkerModule } from "./engine.js";
 import type { FromLedgerWorker, LedgerRequest, ToLedgerWorker } from "./protocol.js";
+
+/** An answer's `memory` field: the thread's bytes outside its JavaScript heap, or nothing where none is reported. */
+const memoryOf = (): { readonly memory?: number } => {
+  const bytes = threadExternalBytes();
+  return bytes === null ? {} : { memory: bytes };
+};
 
 interface LoaderModule {
   loadLedger?(ledger: LedgerName, options: LedgerPackageOptions, data: unknown): Promise<LedgerPackage>;
@@ -120,7 +130,7 @@ export async function runLedgerWorker(modules: readonly LedgerWorkerModule[] = [
       try {
         if (trapped !== null) throw trapped;
         const value = await run(request);
-        send({ type: "answer", id, ok: true, value });
+        send({ type: "answer", id, ok: true, value, ...memoryOf() });
       } catch (thrown) {
         const fatal = thrown instanceof WebAssembly.RuntimeError;
         const error = thrown instanceof Error ? thrown : new Error(String(thrown));
@@ -131,6 +141,7 @@ export async function runLedgerWorker(modules: readonly LedgerWorkerModule[] = [
           ok: false,
           fatal,
           error: { name: error.name, message: `${error.message}${read}` },
+          ...memoryOf(),
         });
         if (fatal) trapped = error;
       } finally {

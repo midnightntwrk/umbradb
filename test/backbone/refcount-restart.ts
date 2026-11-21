@@ -432,6 +432,9 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
     get restarts() {
       return host.restarts;
     },
+    get memoryBytes() {
+      return host.memoryBytes;
+    },
     activity: () => host.activity(),
     bridge: () => host.bridge(),
     get failure() {

@@ -187,6 +187,13 @@ export interface LedgerHost {
   /** How many times {@link LedgerHost.restart} started a new thread. */
   readonly restarts: number;
   /**
+   * The current thread's memory outside its JavaScript heap, in bytes, as its last answer reported it: its ledger
+   * packages' WebAssembly memory and a few MiB more. A WebAssembly memory never shrinks, and a 32-bit package aborts
+   * (`RuntimeError: unreachable`) when it would pass 4 GiB, so this says how close the thread is to that end. Null
+   * before the thread's first answer (a new thread's too) and where nothing is reported (the in-thread ledger).
+   */
+  readonly memoryBytes: number | null;
+  /**
    * Runs one module's ledger tasks for block `input` and returns their results by task name (`../tasks.ts`). The
    * state's stored nodes, if a `needsState` task reads any, are read through `read`.
    */
@@ -436,6 +443,8 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   let closed = false;
   let closing: Promise<void> | undefined;
   let restarts = 0;
+  /** The current thread's memory as its last answer reported it ({@link LedgerHost.memoryBytes}). */
+  let memoryBytes: number | null = null;
   /** The bridge requests and nodes of the threads ended by a restart. */
   const before = { requests: 0, nodes: 0 };
 
@@ -533,6 +542,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       return;
     }
     answeredAt = performance.now();
+    if (message.memory !== undefined) memoryBytes = message.memory;
     const request = pending.get(message.id);
     if (tracing()) {
       if (message.at !== undefined) traceAdd("backMs", traceClock() - message.at);
@@ -626,6 +636,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       pending.clear();
       thread = spawn();
       restarts += 1;
+      memoryBytes = null;
       answeredAt = performance.now();
       // The parses kept for blocks not released yet, sent again in their order, a parse still in flight answered by
       // the new thread; any other request in flight but a ledger task's fails (it ran on the thread that ended).
@@ -650,6 +661,9 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     },
     get restarts() {
       return restarts;
+    },
+    get memoryBytes() {
+      return memoryBytes;
     },
     activity() {
       const [first] = pending.values();
@@ -761,6 +775,7 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
     get restarts() {
       return restarts;
     },
+    memoryBytes: null,
     activity: () => (current === null ? null : Object.freeze({ kind: current.kind, height: current.height, sinceMs: performance.now() - current.sent })),
     bridge: () => ({ requests: 0, nodes: 0 }),
     failure: null,

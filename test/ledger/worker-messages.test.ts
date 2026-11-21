@@ -12,8 +12,8 @@ import type { SeenMessage } from "./fixtures/message-spy-loader.js";
  * The messages between the main thread and the ledger worker, seen in the worker's thread
  * (`./fixtures/message-spy-loader.ts`), for one sequence of requests that loads a stored state through the node-store
  * bridge and applies two blocks on it.
- * - Not traced: every message has the keys it had before the trace of the worker's time existed, and the worker posts
- *   answers and node requests only.
+ * - Not traced: every message has the keys it had before the trace of the worker's time existed, an answer also its
+ *   thread's memory (`memory`), and the worker posts answers and node requests only.
  * - Traced (`src/trace/trace.ts` started before the worker): the worker computes the same; each request, answer and
  *   node request also says when it was posted; the worker posts one entry per applied block, whose parts add up to its
  *   span and whose node waits are the bridge's requests; and the main thread's height gets each request type's round
@@ -128,7 +128,8 @@ describe("the messages between the main thread and the ledger worker", () => {
     for (const message of of(plain.seen, "in")) expect(message.keys).toEqual(["id", "request"]);
     // Every answer but the probe's own, which is posted after the probe ran.
     expect(of(plain.seen, "out", "answer")).toHaveLength(REQUESTS.length - 1);
-    for (const message of of(plain.seen, "out", "answer")) expect(message.keys).toEqual(["type", "id", "ok", "value"]);
+    // An answer also carries the thread's memory outside its JavaScript heap (`memory`).
+    for (const message of of(plain.seen, "out", "answer")) expect(message.keys).toEqual(["type", "id", "ok", "value", "memory"]);
     expect(plain.bridge.requests).toBeGreaterThan(0);
     expect(of(plain.seen, "out", "node")).toHaveLength(plain.bridge.requests);
     for (const message of of(plain.seen, "out", "node")) expect(message.keys).toEqual(["type", "id"]);
@@ -145,7 +146,7 @@ describe("the messages between the main thread and the ledger worker", () => {
     // The probe is posted after the trace's height ended and before the trace stopped: it says when, too.
     expect(of(traced.seen, "in").map((message) => message.type)).toEqual(REQUESTS);
     for (const message of of(traced.seen, "in")) expect(message.keys).toEqual(["id", "request", "at"]);
-    for (const message of of(traced.seen, "out", "answer")) expect(message.keys).toEqual(["type", "id", "ok", "value", "at"]);
+    for (const message of of(traced.seen, "out", "answer")) expect(message.keys).toEqual(["type", "id", "ok", "value", "memory", "at"]);
     expect(of(traced.seen, "out", "node")).toHaveLength(traced.bridge.requests);
     for (const message of of(traced.seen, "out", "node")) expect(message.keys).toEqual(["type", "id", "at"]);
     expect(of(traced.seen, "out", "trace").map((message) => message.keys)).toEqual([["type", "entry"], ["type", "entry"]]);
