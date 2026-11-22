@@ -154,6 +154,12 @@
  * slows the blocks after it for a while; what is stored is what a process restarted at that height stores. Each
  * restart is logged ({@link LedgerBinding.log}) and counted in the block trace (`memoryRestart`).
  *
+ * This restart is a workaround, not a fix: it bounds the memory by throwing the thread away instead of keeping the
+ * packages from growing. The fix is in the ledger packages, whose memory should stay bounded on a sync of any length:
+ * patch `0003-ledger-wasm-node-store-exports`'s `hold_as_node` leaves a dead `sp_cache` entry for every key it hands
+ * out, and the held state never unloads the nodes it has loaded. Once the packages are fixed, the restart on the
+ * memory limit should be removed.
+ *
  * **The keys found stored** ({@link knownKeysOf}, `./stored-keys.ts`). For each process context, the keys the
  * computation's `missing` read found stored, from one settle to the next, so that a block's references are asked about
  * only when no earlier settle found them stored. They are used only while each block continues the one before
@@ -969,6 +975,9 @@ const MEMORY_RESTARTS = new WeakMap<ProcessContext, bigint>();
  * write handle, when the worker's memory (`LedgerHost.memoryBytes`) has reached the limit and either no restart on the
  * limit came less than the span below `last` or the memory has reached the hard limit (see the module comment).
  * Resolves with whether it did. Never with the limit at 0, nor for a worker that reports no memory.
+ *
+ * A workaround for the ledger packages' memory growth, to be removed once the packages keep their memory bounded (see
+ * the module comment).
  */
 export async function restartOverMemoryLimit(
   p: ProcessContext,
