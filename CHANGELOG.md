@@ -70,6 +70,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Nothing is fetched above the core's `stop` or an upgrade boundary.
 - The tape node answers JSON-RPC batch frames (`batches: false` keeps the old −32600 refusal). The tape recorder still
   takes no batches: record with `nodeBatchBlocks: 1`.
+- Coverage floors are checked per directory, not per file. The single-file floors (`durability-probe`, `migrate`, both
+  `errors`, `run-reclaim`) are removed; those files count toward their directory's floor.
 
 ### Fixed
 

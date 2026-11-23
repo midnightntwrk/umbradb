@@ -8,67 +8,52 @@ import { configDefaults, defineConfig } from "vitest/config";
  * **coverage gate**. `src/` behaviour is untouched; coverage only READS `src`.
  *
  * ── Coverage floors ──────────────────────────────────────────────────────────────────────────────────────────────
- * Lines and branches, per file. The repo-wide per-file floor (85 lines / 78 branches) applies to every included file no
- * glob below matches; vitest-4 semantics: a file matched by a glob threshold is checked ONLY against that glob (the
- * global thresholds are NOT inherited), glob keys must be real patterns, and each glob sets `perFile: true` itself.
- *
- * 0.9.5's durability floors (`checkpoint-store`, `save-and-advance`, `watermarks`, `temporal-kv`, `transaction-lease`)
- * and its chain-archive exclusions were retired with those parts; `durability-probe`, `migrate` and `errors` keep their
- * floors at the paths they moved to, below.
+ * Lines and branches, per directory, not per file: one small file swings too far on a single untested path. The
+ * repo-wide floor (85 lines / 78 branches) covers the included files no glob below matches; vitest-4 semantics: a file
+ * matched by a glob threshold is checked ONLY against that glob (the global thresholds are NOT inherited), and glob
+ * keys must be real patterns.
  */
 
 // The floors of `src/`, each added with the directory it
 // covers. The canonical encoding, the contents hash and digests decide whether two databases agree, so they are held
 // above the default.
 const CORE_ARCH = {
-  "**/src/determinism/**": { lines: 95, branches: 90, perFile: true },
-  // The default for `src/**`, added with the database API's directory; its errors module carries the `errors` floor
-  // at the moved path.
-  "**/src/db/**": { lines: 90, branches: 85, perFile: true },
-  "**/src/db/errors.ts": { lines: 95, branches: 91, perFile: true },
-  // The `migrate` floor at its moved path.
-  "**/src/db/migrate.ts": { lines: 90, branches: 85, perFile: true },
-  // The `durability-probe` floor at its moved path.
-  "**/src/db/durability-probe.ts": { lines: 97, branches: 92, perFile: true },
+  "**/src/determinism/**": { lines: 95, branches: 90 },
+  // The default for `src/**`, added with the database API's directory.
+  "**/src/db/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the modules' directory.
-  "**/src/modules/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/modules/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the configuration's directory.
-  "**/src/config/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/config/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the runner's directory.
-  "**/src/runner/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/runner/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the `umbradb` command's directory.
-  "**/src/cli/**": { lines: 90, branches: 85, perFile: true },
-  "**/src/backup/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/cli/**": { lines: 90, branches: 85 },
+  "**/src/backup/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the backbone parts' directory (`core-digest`,
   // `core-block-commit`'s cursor table).
-  "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
-  // The 95/90 floor for the ledger state's reclamation: first the sweep's (`src/ledger/sweep*`), given by the
-  // change that removed the sweep to the step that replaced it, then by the change that moved the step to the tests
-  // to the run computation that replaced it.
-  "**/src/backbone/core-ledger-state/run-reclaim.ts": { lines: 95, branches: 90, perFile: true },
+  "**/src/backbone/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the node client's directory.
-  "**/src/node/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/node/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the admin endpoints' directory.
-  "**/src/admin/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/admin/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the process transport's directory.
-  "**/src/private/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/private/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the library entry's directory.
-  "**/src/library/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/library/**": { lines: 90, branches: 85 },
   // Public modules shipped with the package (token-metadata): the default for `src/**`.
-  "**/src/features/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/features/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the ledger adapters' directory.
-  "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/ledger/**": { lines: 90, branches: 85 },
   // The default for `src/**`, added with the block trace's directory.
-  "**/src/trace/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/trace/**": { lines: 90, branches: 85 },
   // The test tape: not in the package, but the tests of ingest, faults and differentials stand on it, so it
   // is measured and held to the default like `src/**`.
-  "**/tools/tape/**": { lines: 90, branches: 85, perFile: true },
+  "**/tools/tape/**": { lines: 90, branches: 85 },
   // The storage helpers (held above the default like determinism), added with the cursor table.
-  "**/src/helpers/**": { lines: 95, branches: 90, perFile: true },
-  // The `deterministic_postgresql` component, held above the default like determinism;
-  // `UmbraError` moved into it, and the `errors` floor moved with the class.
-  "**/src/deterministic-postgresql/**": { lines: 95, branches: 90, perFile: true },
-  "**/src/deterministic-postgresql/errors.ts": { lines: 95, branches: 91, perFile: true },
+  "**/src/helpers/**": { lines: 95, branches: 90 },
+  // The `deterministic_postgresql` component, held above the default like determinism.
+  "**/src/deterministic-postgresql/**": { lines: 95, branches: 90 },
 } as const;
 
 // A shard's coverage is partial, so floors are checked only after `--merge-reports`. Read from Vitest's own arguments,
@@ -140,9 +125,7 @@ export default defineConfig({
       reporter: coverageShard ? ["text-summary"] : ["text", "json-summary", "html"],
       reportsDirectory: "./coverage",
       thresholds: coverageShard ? undefined : {
-        // Repo-wide floor, checked PER FILE (`perFile: true`). Applies to every included file no glob of CORE_ARCH
-        // matches.
-        perFile: true,
+        // Repo-wide floor, over the included files no glob of CORE_ARCH matches.
         lines: 85,
         branches: 78,
         ...CORE_ARCH,

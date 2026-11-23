@@ -111,7 +111,7 @@ describe("the gates match the retirement list", () => {
       .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name));
     expect(srcEntries).toContain("db/");
     expect(floorProblems(coverage!.thresholds!, coverage!.exclude ?? [], srcEntries, PENDING_FLOORS)).toEqual([]);
-    // No floor of the retirement list is pending: the reclamation step's 95/90 is held like the others.
+    // No floor of the retirement list is pending.
     expect(PENDING_FLOORS).toEqual([]);
   });
 
@@ -150,9 +150,9 @@ describe("negative controls: a list that differs from the retirement list fails,
     expect(floorProblems(retired, [], dirs, PENDING_FLOORS)).toEqual([
       "vitest.config.ts still holds the floor **/postgres/watermarks.ts, retired by design.md §13",
     ]);
-    const { ["**/src/db/durability-probe.ts"]: _probe, ...withoutProbe } = thresholds;
-    expect(floorProblems(withoutProbe, [], dirs, PENDING_FLOORS)).toEqual([
-      "vitest.config.ts has no floor **/src/db/durability-probe.ts (design.md §13)",
+    const { ["**/src/determinism/**"]: _determinism, ...withoutDeterminism } = thresholds;
+    expect(floorProblems(withoutDeterminism, [], dirs, PENDING_FLOORS)).toEqual([
+      "vitest.config.ts has no floor **/src/determinism/** (design.md §13)",
     ]);
     const weakened = { ...thresholds, "**/src/helpers/**": { lines: 95, branches: 85 } };
     expect(floorProblems(weakened, [], dirs, PENDING_FLOORS)).toEqual([
@@ -163,12 +163,12 @@ describe("negative controls: a list that differs from the retirement list fails,
       "src/loose.ts lies under no floor of design.md §13 (only directories have one)",
     ]);
     // A pending floor may be absent, but not weaker; once nothing is pending, its absence fails.
-    const step = "**/src/backbone/core-ledger-state/run-reclaim.ts";
+    const step = "**/tools/tape/**";
     const { [step]: _step, ...withoutStep } = thresholds;
     expect(floorProblems(withoutStep, [], dirs, [step])).toEqual([]);
     expect(floorProblems(withoutStep, [], dirs)).toEqual([`vitest.config.ts has no floor ${step} (design.md §13)`]);
-    expect(floorProblems({ ...withoutStep, [step]: { lines: 95, branches: 89 } }, [], dirs, [step])).toEqual([
-      `vitest.config.ts holds ${step} at 95/89, below 95/90 (design.md §13)`,
+    expect(floorProblems({ ...withoutStep, [step]: { lines: 90, branches: 84 } }, [], dirs, [step])).toEqual([
+      `vitest.config.ts holds ${step} at 90/84, below 90/85 (design.md §13)`,
     ]);
     expect(floorProblems(thresholds, ["src/postgres/chain-archive-store.ts"], dirs, PENDING_FLOORS)).toEqual([
       "vitest.config.ts still excludes src/postgres/chain-archive-store.ts from coverage (chain archive)",
