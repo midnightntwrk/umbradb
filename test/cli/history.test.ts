@@ -3,13 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BACKUP_FORMAT, type Manifest, manifestLine } from "../../src/backup/manifest.js";
+import { EXIT } from "../../src/cli/command.js";
 import { historyExportArguments, runHistoryExport, writeHistoryFile } from "../../src/cli/history.js";
 import { runRestore } from "../../src/cli/restore.js";
 import { historyFileText, parseHistoryFile, type RecordedHistory } from "../../src/config/recorded-history.js";
 import type { UmbraError } from "../../src/db/errors.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { startTicker, tickerModule, writeTickerConfig } from "../backup/backup-fixtures.js";
-import { type CliProject, cliProject } from "./cli-fixtures.js";
+import { type CliProject, cliProject, inProcess } from "./cli-fixtures.js";
 
 /** `umbradb history export`, and a restore's history file. */
 
@@ -31,6 +32,10 @@ afterAll(() => {
 /** A new history file name next to the configurations. */
 const historyName = () => `history-${++files}.json`;
 
+/** `umbradb history export --config <config>`, in the project's directory. */
+const exported = (config: string, extra: readonly string[] = []) =>
+  inProcess(["history", "export", "--config", config, ...extra], project.dir);
+
 /** Runs the ticker of `config` until its core stops at `stop`. */
 async function runUntilStopped(config: string, stop: bigint): Promise<void> {
   const ticker = await startTicker(config, stop + 5n);
@@ -47,8 +52,9 @@ describe("umbradb history export", () => {
     const history = historyName();
     await runUntilStopped(writeTickerConfig(project, { database, stop: 5, history }), 5n);
 
-    const first = await runHistoryExport({ config: writeTickerConfig(project, { database, history }), cwd: project.dir });
-    expect(first).toMatchObject({ written: true });
+    const first = await exported(writeTickerConfig(project, { database, history }));
+    expect(first).toMatchObject({ code: EXIT.ok, stderr: "" });
+    expect(first.stdout).toMatch(/^umbradb history export: wrote .*: height 5, 2 revisions\n$/);
     const written = parseHistoryFile(readFileSync(join(project.dir, history), "utf8"), history);
     expect(written.height).toBe("5");
     expect(written.revisions.map((r) => [r.id, r.start])).toEqual([["core", "1"], ["ticker", "1"]]);
@@ -57,10 +63,19 @@ describe("umbradb history export", () => {
     await runUntilStopped(writeTickerConfig(project, { database, stop: 8, history }), 8n);
 
     // Exported again, a configuration without ticker stops it at the exported height.
-    expect(await runHistoryExport({ config: writeTickerConfig(project, { database, history }), cwd: project.dir })).toMatchObject({
-      written: true,
-    });
-    await runUntilStopped(writeTickerConfig(project, { database, stop: 10, history, entry: null }), 10n);
+    expect(await exported(writeTickerConfig(project, { database, history }))).toMatchObject({ code: EXIT.ok });
+    const dropped = writeTickerConfig(project, { database, stop: 10, history, entry: null });
+    await runUntilStopped(dropped, 10n);
+
+    // --out, relative to the working directory, takes the place of the configuration's file.
+    expect(await exported(dropped, ["--out", "dropped.json"])).toMatchObject({ code: EXIT.ok });
+    const after = parseHistoryFile(readFileSync(join(project.dir, "dropped.json"), "utf8"), "dropped.json");
+    expect(after.height).toBe("10");
+    expect(after.revisions.find((r) => r.id === "ticker")).toMatchObject({ start: "1", stop: "8" });
+
+    const failed = await exported(dropped, ["--out", join("missing", "h.json")]);
+    expect(failed).toMatchObject({ code: EXIT.failed, stdout: "" });
+    expect(failed.stderr).toMatch(/^umbradb history export: failed: .*ENOENT/);
   });
 
   it("takes --out and --config once each, and nothing else", () => {

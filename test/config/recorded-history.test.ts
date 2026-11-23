@@ -98,6 +98,31 @@ describe("withRecordedHistory", () => {
     const result = merged([CORE, M_1_0.entry({ start: 0, config: {} }), later], rows, build([M_1_0]));
     expect(result.at("m")).toEqual([[10, null, true], [80, null, true]]);
   });
+
+  it("keeps a module stopped below the height as recorded, listed or not", () => {
+    const rows = recordedBy([CORE, M_1_0.entry({ start: 10, stop: 30, config: {} })], [M_1_0]);
+    const listed = merged([CORE, M_1_0.entry({ start: 0, stop: 30, config: {} })], rows, build([M_1_0]));
+    expect(listed.at("m")).toEqual([[10, 30, true]]);
+    expect(listed.writes).toEqual([]);
+    const unlisted = merged([CORE], rows, build([M_1_0]));
+    expect(unlisted.at("m")).toEqual([[10, 30, true]]);
+    expect(unlisted.writes).toEqual([]);
+  });
+
+  it("keeps a stop above the height: on the recorded revision it continues, and on the one changed data starts", () => {
+    const rows = recordedBy([CORE, M_1_0.entry({ start: 10, stop: 80, config: {} })], [M_1_0]);
+    const same = merged([CORE, M_1_0.entry({ start: 0, stop: 80, config: {} })], rows, build([M_1_0]));
+    expect(same.at("m")).toEqual([[10, 80, true]]);
+    expect(same.writes).toEqual([]);
+    const changed = merged([CORE, M_1_0.entry({ start: 0, stop: 80, config: { limit: 20 } })], rows, build([M_1_0]));
+    expect(changed.at("m")).toEqual([[10, 80, true], [51, 80, true]]);
+    expect(changed.writes).toEqual([["m", 51]]);
+  });
+
+  it("keeps a new module's entry starting above the height as written, with nothing at the height after", () => {
+    const result = merged([CORE, N.entry({ start: 80, config: {} })], recordedBy([CORE], []), build([N]));
+    expect(result.at("n")).toEqual([[80, null, true]]);
+  });
 });
 
 describe("the history file", () => {

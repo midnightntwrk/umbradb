@@ -79,6 +79,17 @@ describe("an unknown subcommand or none prints the usage and exits 2", () => {
     expect(other.stderr.startsWith("umbradb: unknown command config sync\n\n")).toBe(true);
   });
 
+  it("umbradb history without export, or export given a file, says what history takes", async () => {
+    const result = await inProcess(["history"], CWD);
+    expect(printsUsage(result)).toBe(true);
+    expect(result.stderr.startsWith("umbradb: history takes a command: history export\n\n")).toBe(true);
+    const other = await inProcess(["history", "import"], CWD);
+    expect(other.stderr.startsWith("umbradb: unknown command history import\n\n")).toBe(true);
+    const file = await inProcess(["history", "export", "h.json"], CWD);
+    expect(printsUsage(file)).toBe(true);
+    expect(file.stderr).toContain("history export takes no file of its own");
+  });
+
   it("a URL typed where a command goes is repeated with its credentials hidden", async () => {
     const result = await inProcess(["postgres://reader:pw-4-4-ARG@db.example/indexer"], CWD);
     expect(printsUsage(result)).toBe(true);
