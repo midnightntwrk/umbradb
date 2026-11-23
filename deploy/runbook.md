@@ -19,8 +19,10 @@ network. Run everything from the laptop, in this repository.
 - The database must be empty: drop and recreate it first if not
   (`sudo -u postgres dropdb umbradb_<network>`, then `./provision.sh` recreates it).
 - The `umbradb` user must be able to read the file (`sudo chgrp umbradb <file> && sudo chmod g+r <file>`).
-- A backup made by an older ledger build restores as an upgrade: its core revisions go to `~umbradb/history/<network>.json`
-  and the configuration keeps them. The next ledger rebuild will need the same for the running databases.
+- The restore writes the backup's history to `~umbradb/history/<network>.json`, which the configuration names. A
+  backup made by an older build then runs this build's entries from the height after it.
+- Every deploy rewrites each network's history file from its database (`umbradb history export`) while the instances
+  are stopped, so a new build takes over each running database from its current height.
 
 ## On the host
 

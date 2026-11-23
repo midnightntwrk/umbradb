@@ -29,8 +29,8 @@
  *    or moved (which omits its `(id, start)` and lists another), and is then deleted ({@link omissionAllowed},
  *    {@link HistoryCheck.deletes}).
  * 2. `changes-past`: an entry starting at or below the cursor c is recorded, with its version and every data field as
- *    recorded. For a module, its stop is also as recorded, unless both the recorded and the new stop are above c (no
- *    stop counts as above every c: {@link stopChangeAllowed}). Operational and secret fields are never recorded, so
+ *    recorded. For a module, its stop is also as recorded, unless the recorded stop is above c and the new one at or
+ *    above it (no stop counts as above every c: {@link stopChangeAllowed}). Operational and secret fields are never recorded, so
  *    they may change at any restart, the core's stop among them.
  * 3. `upgrade-required`: for every entry, the revision covering c + 1 (S on a new database) names the build's version
  *    (`buildCoreVersion()` for `core`, the declaration's `version` for a module).
@@ -381,12 +381,12 @@ export function configHashOf(rows: readonly ConfigHashRow[]): string {
 }
 
 /**
- * When a module's stop may change: a changed stop is accepted when both the recorded and the new one are above the
- * cursor (no stop counts as above every cursor), since then the change affects only heights not yet processed.
+ * When a module's stop may change: a changed stop is accepted when the recorded one is above the cursor and the new one
+ * at or above it (no stop counts as above every cursor), since then the change affects only heights not yet processed.
+ * A new stop at the cursor is how a restored history stops a module the configuration no longer runs.
  */
 export function stopChangeAllowed(recorded: bigint | null, configured: bigint | null, cursor: bigint): boolean {
-  const above = (stop: bigint | null) => stop === null || stop > cursor;
-  return above(recorded) && above(configured);
+  return (recorded === null || recorded > cursor) && (configured === null || configured >= cursor);
 }
 
 /**

@@ -92,8 +92,9 @@ describe("an unknown subcommand or none prints the usage and exits 2", () => {
     expect(USAGE).toContain("umbradb config check <file> [--database]");
     expect(USAGE).toContain("umbradb backup --out <file> [--config <file>]");
     expect(USAGE).toContain("umbradb restore <file> [--config <file>]");
+    expect(USAGE).toContain("umbradb history export [--out <file>] [--config <file>]");
     for (const status of ["0 ", "1 ", "2 ", "3 "]) expect(USAGE).toContain(`  ${status}`);
-    expect(Object.keys(COMMANDS).sort()).toEqual(["backup", "config", "restore", "run"]);
+    expect(Object.keys(COMMANDS).sort()).toEqual(["backup", "config", "history", "restore", "run"]);
   });
 
   it("--help and -h print the usage on stdout and exit 0", async () => {

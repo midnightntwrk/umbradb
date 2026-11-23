@@ -9,6 +9,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Recorded history files: a configuration's `history: "<file>"` supplies every revision the database ran up to the
+  file's height, so the configuration lists only what it runs now. `umbradb restore` writes the backup's history there,
+  and `umbradb history export` writes the database's own. Its entries continue the recorded revisions when unchanged,
+  and otherwise start at the height after the file's; a recorded module it no longer lists stops at that height. A
+  module's stop may now be added at the cursor.
+
 - Routes for a module's API (`src/modules/route.ts`): `defineRoute({ name, input, output, http?, handle })` declares
   one operation with zod schemas and no transport, and `api.route(route)` registers it from `on-start-api`. The core
   keeps every route with its schemas as JSON Schema and serves it over HTTP under `/<module-id>` (`POST

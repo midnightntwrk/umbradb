@@ -309,6 +309,7 @@ import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
 import { configModules, configModuleUrl, configPath, importConfig, loadModuleList } from "../config/load.js";
 import { resolve } from "node:path";
+import type { RecordedHistory } from "../config/recorded-history.js";
 import type { PlainObject } from "../config/plain-data.js";
 import { configRedactor, type Redactor, redactor } from "../config/redact.js";
 import type { CheckedConfig, CheckedEntry } from "../config/validate.js";
@@ -1047,6 +1048,8 @@ interface LoadedInput {
   readonly file: string | null;
   readonly data: unknown;
   readonly modules: readonly unknown[];
+  /** The file's recorded history (`history`); null for data given. */
+  readonly history: RecordedHistory | null;
 }
 
 /**
@@ -1818,9 +1821,9 @@ class Process implements ProcessHandle {
         this.#know(exports.default, Array.isArray(exported) ? exported : null);
       };
       const imported = await importConfig({ file: config.file, cwd, evaluated: know });
-      loaded = { file: imported.file, data: imported.data, modules: configModules(imported) };
+      loaded = { file: imported.file, data: imported.data, modules: configModules(imported), history: imported.history };
     } else {
-      loaded = { file: null, data: config.data, modules: [] };
+      loaded = { file: null, data: config.data, modules: [], history: null };
     }
     // A module file's list (`modulesFrom`), imported as the ledger worker imports it.
     if (userModules !== undefined && "from" in userModules && userModules.from instanceof URL) {
@@ -1864,6 +1867,7 @@ class Process implements ProcessHandle {
       data: loaded.data,
       file: loaded.file,
       userModules,
+      history: loaded.history,
       ...(input.declarations === undefined ? {} : { declarations: input.declarations }),
       ...(input.processCore === undefined ? {} : { processCore: input.processCore }),
     });

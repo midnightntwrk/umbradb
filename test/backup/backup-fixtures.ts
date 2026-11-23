@@ -111,6 +111,8 @@ export interface TickerConfig {
   readonly entry?: string | null;
   /** S; 1 unless given. */
   readonly start?: number;
+  /** The configuration's history file, relative to it; none unless given. */
+  readonly history?: string;
 }
 
 let files = 0;
@@ -131,6 +133,7 @@ export function writeTickerConfig(project: CliProject, options: TickerConfig): s
       "void versionEntry;",
       "export const modules = [ticker];",
       "export default defineConfig({",
+      ...(options.history === undefined ? [] : [`  history: ${JSON.stringify(options.history)},`]),
       "  entries: [",
       `    coreEntry({ start: ${options.start ?? 1}${stop}, config: ${core} }),`,
       ...(options.entry === null ? [] : [`    ${options.entry ?? "ticker.entry({ start: 1, config: {} })"},`]),
