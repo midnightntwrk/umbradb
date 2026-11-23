@@ -13,7 +13,7 @@
  *.
  * - `umbradb backup --out <file> [--config <file>]` writes a backup of the configuration file's database
  *   (`./backup.ts`): exit 0 once written, 1 when refused (nothing written).
- * - `umbradb restore <file> [--config <file>]` restores a backup into the configuration file's database, which must be
+ * - `umbradb restore <file> [--config <file>] [--overwrite-history]` restores a backup into the configuration file's database, which must be
  *   empty (`./restore.ts`): exit 0 once committed, 1 when refused (nothing committed).
  * - `umbradb history export [--out <file>] [--config <file>]` writes the database's recorded history to the
  *   configuration's history file (`./history.ts`): exit 0 once written, 1 when refused.
@@ -61,8 +61,9 @@ Commands:
       against the configuration history of the database it configures, read-only.
   umbradb backup --out <file> [--config <file>]
       Back up the configuration's database (default umbradb.config.ts): a pg_dump file with its manifest.
-  umbradb restore <file> [--config <file>]
-      Restore a backup into the configuration's database, which must be empty (default umbradb.config.ts).
+  umbradb restore <file> [--config <file>] [--overwrite-history]
+      Restore a backup into the configuration's database, which must be empty (default umbradb.config.ts), and
+      write its history to the configuration's history file; --overwrite-history replaces one holding another.
   umbradb history export [--out <file>] [--config <file>]
       Write the configuration's database's recorded history to the configuration's history file, or --out.
   umbradb --help
@@ -267,6 +268,7 @@ export function restoreCommand(seams: RestoreCommandSeams = {}): CommandHandler 
         cwd: io.cwd,
         log: (line) => io.stderr(`${line}\n`),
         say: (line) => io.stdout(`${line}\n`),
+        ...(parsed.overwriteHistory === true ? { overwriteHistory: true } : {}),
       },
       seams,
     );

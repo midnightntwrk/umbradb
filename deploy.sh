@@ -249,21 +249,17 @@ on_host_restore() {
   if enabled "$net" || systemctl is-active -q "umbradb@$net"; then die "umbradb@$net is on: ./deploy.sh stop $net first"; fi
   [[ -f $file ]] || die "no file $file on the host"
   runuser -u umbradb -- test -r "$file" || die "the umbradb user cannot read $file"
-  # The restore writes the backup's history here; a previous restore's is kept aside until this one succeeds.
-  local history=$APP/history/$net.json
+  # The restore replaces the history file only once it commits.
   install -d -o umbradb -g umbradb "$APP/history"
-  if [[ -f $history ]]; then mv "$history" "$history.previous"; fi
   log "restoring $file into umbradb_$net"
   # The progress in the background, so the restore keeps the terminal (and Ctrl-C).
   restore_progress "$(realpath "$file")" "$net" &
   local progress=$!
   # shellcheck disable=SC2064 # the pid now: $progress is gone by the time the trap runs
   trap "kill $progress 2> /dev/null || true" EXIT
-  if ! umbradb "$net" restore "$(realpath "$file")" --config "$APP/umbradb.config.ts"; then
-    if [[ -f $history.previous ]]; then mv "$history.previous" "$history"; fi
+  if ! umbradb "$net" restore "$(realpath "$file")" --config "$APP/umbradb.config.ts" --overwrite-history; then
     die "restore failed: umbradb_$net is unchanged"
   fi
-  rm -f "$history.previous"
   log "restored: ./deploy.sh start $net"
 }
 

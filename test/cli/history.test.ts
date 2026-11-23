@@ -6,6 +6,8 @@ import { BACKUP_FORMAT, type Manifest, manifestLine } from "../../src/backup/man
 import { historyExportArguments, runHistoryExport, writeHistoryFile } from "../../src/cli/history.js";
 import { runRestore } from "../../src/cli/restore.js";
 import { historyFileText, parseHistoryFile, type RecordedHistory } from "../../src/config/recorded-history.js";
+import type { UmbraError } from "../../src/db/errors.js";
+import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { startTicker, tickerModule, writeTickerConfig } from "../backup/backup-fixtures.js";
 import { type CliProject, cliProject } from "./cli-fixtures.js";
 
@@ -90,7 +92,7 @@ describe("umbradb history export", () => {
 });
 
 describe("a restore's history file", () => {
-  it("is refused when the file the configuration names holds another history (backup-history-mismatch)", async () => {
+  it("is refused when the file the configuration names holds another history, unless --overwrite-history", async () => {
     const hash = `0x${"ab".repeat(32)}`;
     const manifest: Manifest = {
       format: BACKUP_FORMAT,
@@ -116,6 +118,15 @@ describe("a restore's history file", () => {
       restored: false,
       error: { code: "backup-history-mismatch", details: { reason: "history-file-differs" } },
     });
+    expect(parseHistoryFile(readFileSync(join(project.dir, history), "utf8"), history).height).toBe("7");
+
+    // --overwrite-history lets the restore go on; this one fails a later check, so the file is still left as it was.
+    const overwriting = await runRestore(
+      { file: backup, config: writeTickerConfig(project, { database, history }), cwd: project.dir, overwriteHistory: true },
+      { source: () => new InMemoryBlockSource({ head: 20n }) },
+    );
+    expect(overwriting).toMatchObject({ restored: false });
+    expect((overwriting as { error: UmbraError }).error.details?.reason).not.toBe("history-file-differs");
     expect(parseHistoryFile(readFileSync(join(project.dir, history), "utf8"), history).height).toBe("7");
   });
 });

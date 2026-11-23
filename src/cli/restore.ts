@@ -1,5 +1,5 @@
 /**
- * `umbradb restore <file> [--config <file>]`: restores a backup into the database the configuration file names
+ * `umbradb restore <file> [--config <file>] [--overwrite-history]`: restores a backup into the database the configuration file names
  * (`./configured.ts`), which must be empty, through `src/backup/restore.ts` (`restoreBackup`). This covers the checks
  * before loading, the file's SQL in one transaction on the writer connection, the owners and grants, and the contents
  * hash and the ledger state root, checked before the commit.
@@ -53,28 +53,38 @@ async function backupHistory(file: string): Promise<RecordedHistory | null> {
 }
 
 /** `restore`'s arguments — one file, at most one `--config <file>`, nothing else —, or what is wrong with them. */
-export function restoreArguments(args: readonly string[]): { readonly file: string; readonly config?: string } | string {
+export function restoreArguments(
+  args: readonly string[],
+): { readonly file: string; readonly config?: string; readonly overwriteHistory?: true } | string {
   const { tokens } = parseArgs({
     args: [...args],
-    options: { config: { type: "string" } },
+    options: { config: { type: "string" }, "overwrite-history": { type: "boolean" } },
     allowPositionals: true,
     strict: false,
     tokens: true,
   });
   const files: string[] = [];
   const configs: (string | undefined)[] = [];
+  let overwriteHistory = false;
   for (const token of tokens) {
     if (token.kind === "positional") files.push(token.value);
     else if (token.kind === "option") {
-      if (token.name !== "config") return `unknown option ${token.rawName} of restore`;
-      configs.push(token.value);
+      if (token.name === "overwrite-history" && token.value === undefined) overwriteHistory = true;
+      else if (token.name === "config") configs.push(token.value);
+      else return `unknown option ${token.rawName} of restore`;
     }
   }
-  if (files.length !== 1) return "restore takes one backup file: umbradb restore <file> [--config <file>]";
+  if (files.length !== 1) {
+    return "restore takes one backup file: umbradb restore <file> [--config <file>] [--overwrite-history]";
+  }
   if (configs.length > 1) return "restore takes --config once";
   const [config] = configs;
   if (configs.length === 1 && (config === undefined || config === "")) return "--config takes a value: the configuration file";
-  return config === undefined ? { file: files[0] as string } : { file: files[0] as string, config };
+  return {
+    file: files[0] as string,
+    ...(config === undefined ? {} : { config }),
+    ...(overwriteHistory ? { overwriteHistory: true as const } : {}),
+  };
 }
 
 /** What the tests replace. */
@@ -99,6 +109,8 @@ export interface RestoreCommandOptions {
   readonly log?: (line: string) => void;
   /** Where what the restore did besides restoring is told: a PGlite directory it created. */
   readonly say?: (line: string) => void;
+  /** Replaces a history file that holds another history than the backup's. */
+  readonly overwriteHistory?: boolean;
 }
 
 /** What `umbradb restore` restored, or why it did not. */
@@ -169,11 +181,12 @@ export async function runRestore(options: RestoreCommandOptions, seams: RestoreC
     redact = config.redact;
     // The configuration's history file is written from the backup; one holding another history is left alone.
     const historyFile = history === null ? null : config.historyFile;
-    if (historyFile !== null && config.existingHistory !== null && !sameHistory(config.existingHistory, history as RecordedHistory)) {
+    const differs = config.existingHistory !== null && !sameHistory(config.existingHistory, history as RecordedHistory);
+    if (historyFile !== null && differs && options.overwriteHistory !== true) {
       throw new UmbraError(
         "backup-history-mismatch",
-        `the history file ${historyFile} holds another history than the backup's: remove it, and the restore writes the ` +
-          "backup's there",
+        `the history file ${historyFile} holds another history than the backup's: remove it, or restore with ` +
+          "--overwrite-history",
         { reason: "history-file-differs", file: historyFile },
       );
     }

@@ -202,8 +202,8 @@ transport reader's login.
 - `umbradb config check <file> [--database]`: type-checks and validates the file without starting anything; with
   `--database`, also checks it against the configuration history of the database the file names, read-only.
 - `umbradb backup --out <file> [--config <file>]`: writes a backup of the configuration's database.
-- `umbradb restore <file> [--config <file>]`: restores a backup into the configuration's database, which must be
-  empty.
+- `umbradb restore <file> [--config <file>] [--overwrite-history]`: restores a backup into the configuration's
+  database, which must be empty.
 - `umbradb history export [--out <file>] [--config <file>]`: writes the database's recorded history to the
   configuration's history file ([Recorded history](#recorded-history)).
 - `umbradb --help`: the usage.
@@ -337,8 +337,8 @@ export default defineConfig({
 });
 ```
 
-- **`umbradb restore`** writes the backup's history there. It refuses (`backup-history-mismatch`) when a file there
-  holds another history: remove it first.
+- **`umbradb restore`** writes the backup's history there once the restore commits. It refuses
+  (`backup-history-mismatch`) when a file there holds another history, unless given `--overwrite-history`.
 - **`umbradb history export`** writes the database's own history there. Stop the process first, then export and
   start the new build.
 - **At startup**, every revision up to the file's height comes from the file. Each entry of the configuration then
