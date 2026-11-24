@@ -74,6 +74,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   - The calls made together go to the node as one JSON-RPC batch frame (up to `nodeBatchBlocks` blocks' calls). A node
     that refuses a batch, or answers none of it, gets single calls for the rest of that connection; the calls are sent
     again on their own (`node-unreachable`, reason `batch-refused`).
+- Backups no longer carry a contents hash, and restores no longer check one; `contents-hash-mismatch` is removed.
+  Computing it took most of a backup's time and a large part of a restore's. A restore still checks the manifest
+  against the chain and the configuration, and the ledger state root. A backup's manifest stays format 1, and a
+  `contentsHash` in an earlier build's backup is ignored. The backup and restore lines no longer print the hash, and
+  the browser page's records no longer hold it. The contents hash itself, its export and `/status` are unchanged.
 - Nothing is fetched above the core's `stop` or an upgrade boundary.
 - The tape node answers JSON-RPC batch frames (`batches: false` keeps the old −32600 refusal). The tape recorder still
   takes no batches: record with `nodeBatchBlocks: 1`.

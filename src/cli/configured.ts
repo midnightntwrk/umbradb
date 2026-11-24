@@ -178,15 +178,3 @@ export async function openRestoreTarget(
   }
   return openCommandDatabase(target, config);
 }
-
-/** The tables the build declares `deterministic: false`: every module of `declarations`, each table once. */
-export function declaredOptOuts(declarations: DeclarationSet<ModuleDeclaration>): { schema: string; table: string }[] {
-  const out = new Map<string, { schema: string; table: string }>();
-  for (const declaration of [...declarations.backbone, ...declarations.core, ...declarations.user]) {
-    for (const item of declaration.provides) {
-      if (item.table?.deterministic !== false) continue;
-      for (const table of item.table.tables) out.set(JSON.stringify([item.table.schema, table]), { schema: item.table.schema, table });
-    }
-  }
-  return [...out.values()];
-}

@@ -397,7 +397,7 @@ describe("a file system that refuses the mode", () => {
     const db = await openPglite({ dataDir: "memory://", committedHeight: async () => 1n, developmentOptIn: true });
     try {
       await expect(
-        writeBackup({ db, target: { backend: "pglite" }, out, optedOut: [], developmentOptIn: true }),
+        writeBackup({ db, target: { backend: "pglite" }, out, developmentOptIn: true }),
       ).rejects.toBe(refused);
       expect(chmod).toHaveBeenCalledWith(OWNER_ONLY);
     } finally {

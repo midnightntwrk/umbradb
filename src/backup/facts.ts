@@ -9,10 +9,7 @@
  * - every `core_chain.config` and `core_chain.migrations` row;
  * - the ledger state root stored for that height, when `core_ledger_state.states` exists;
  * - the server's version;
- * - whether the database is a private process's, which is the case when it holds `core_private_source.cursor`;
- * - the contents hash, which records the tables declared `deterministic: false` by name only, and the
- *   content-defined tables by their content: a database whose content-defined tables its content function refuses
- *   (`ledger-refcount-invalid`) gives no facts, so no backup is written.
+ * - whether the database is a private process's, which is the case when it holds `core_private_source.cursor`.
  */
 
 import { readCursor } from "../backbone/core-block-commit/sql.js";
@@ -21,8 +18,7 @@ import { readPrivateCursor } from "../backbone/core-private-source/sql.js";
 import type { PlainObject } from "../config/plain-data.js";
 import type { ReadHandle } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
-import { type ContentDefinedTables, contentsHash } from "../determinism/contents-hash.js";
-import { keyOrderTerm, type TableName } from "../deterministic-postgresql/index.js";
+import { keyOrderTerm } from "../deterministic-postgresql/index.js";
 import type { Manifest, ManifestHistoryRow, ManifestMigration } from "./manifest.js";
 
 /** `0x`-prefixed lowercase hex of `bytes`. */
@@ -61,13 +57,9 @@ export async function isPrivateDatabase(read: Pick<ReadHandle, "query">): Promis
 
 /**
  * Reads the manifest's fields of the database `read` sees (see the module comment). Rejects with
- * `no-committed-height` when nothing is committed yet: a backup holds one committed height. `options.contentDefined`
- * are the build's content-defined tables, none unless given.
+ * `no-committed-height` when nothing is committed yet: a backup holds one committed height.
  */
-export async function readBackupFacts(
-  read: Pick<ReadHandle, "query">,
-  options: { readonly optedOut: readonly TableName[]; readonly contentDefined?: readonly ContentDefinedTables[] },
-): Promise<BackupFacts> {
+export async function readBackupFacts(read: Pick<ReadHandle, "query">): Promise<BackupFacts> {
   const isPrivate = await isPrivateDatabase(read);
   const cursor = isPrivate ? await readPrivateCursor(read) : await readCursor(read);
   const identity = await readIdentity(read);
@@ -108,7 +100,6 @@ export async function readBackupFacts(
     stateRoot = row === undefined ? null : hex(row.state_root as Uint8Array);
   }
   const [server] = await read.query(VERSION_SQL);
-  const hash = await contentsHash(read, { optedOut: options.optedOut, contentDefined: options.contentDefined ?? [] });
   return Object.freeze({
     private: isPrivate,
     manifest: Object.freeze({
@@ -119,7 +110,6 @@ export async function readBackupFacts(
       stateRoot,
       history: Object.freeze(history),
       migrations: Object.freeze(migrations),
-      contentsHash: hex(hash),
       postgres: String(server?.version),
     }),
   });

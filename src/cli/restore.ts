@@ -208,8 +208,7 @@ export async function runRestore(options: RestoreCommandOptions, seams: RestoreC
     );
     const next = BigInt(manifest.height) + 1n;
     let line =
-      `umbradb restore: restored ${file}: height ${manifest.height}, contents hash ${manifest.contentsHash}; the ` +
-      `database resumes from ${next}`;
+      `umbradb restore: restored ${file}: height ${manifest.height}; the database resumes from ${next}`;
     if (historyFile !== null) {
       try {
         await writeHistoryFile(historyFile, history as RecordedHistory);

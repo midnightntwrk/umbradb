@@ -1,10 +1,9 @@
-import { declaredOptOuts } from "../../src/cli/configured.js";
 import type { ReadHandle } from "../../src/db/api.js";
 import { SHADOW_SCHEMA } from "../../src/db/change-capture.js";
 import { contentsHash as hashByBytes } from "../../src/determinism/contents-hash.js";
 import { contentsHash } from "../../src/index.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
-import { validateDeclarations } from "../../src/modules/validation.js";
+import { type DeclarationSet, validateDeclarations } from "../../src/modules/validation.js";
 import { chainDeclarations } from "./chain-build.js";
 import { watched, watcher } from "./ingest-harness.js";
 import { seenTables, sweepCore, sweepWatcher, type TableSnapshot } from "./ledger-graph-tapes.js";
@@ -32,6 +31,18 @@ export const CONTENT_DEFINED_TABLES: readonly string[] = ["nodes", "ref_counts",
 export function dagOptedOut(user: readonly ModuleDeclaration[] = []): { schema: string; table: string }[] {
   const modules = [watcher(watched()), sweepWatcher(seenTables()), ...user];
   return declaredOptOuts(validateDeclarations(chainDeclarations(modules, { core: sweepCore() })));
+}
+
+/** The tables `declarations` declare `deterministic: false`, each once. */
+function declaredOptOuts(declarations: DeclarationSet<ModuleDeclaration>): { schema: string; table: string }[] {
+  const out = new Map<string, { schema: string; table: string }>();
+  for (const declaration of [...declarations.backbone, ...declarations.core, ...declarations.user]) {
+    for (const item of declaration.provides) {
+      if (item.table?.deterministic !== false) continue;
+      for (const table of item.table.tables) out.set(JSON.stringify([item.table.schema, table]), { schema: item.table.schema, table });
+    }
+  }
+  return [...out.values()];
 }
 
 const hexOf = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;

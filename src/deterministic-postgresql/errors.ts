@@ -323,8 +323,6 @@ export const ERROR_CODES = [
   "backup-genesis-mismatch",
   /** The node has not finalized the backup's block: its head is below the backup's height, or another block is there. */
   "backup-block-not-finalized",
-  /** The restored database's contents hash is not the manifest's: the restore rolled back. */
-  "contents-hash-mismatch",
   /** The ledger state root the backup stores at its height is not the node's: the restore rolled back. */
   "backup-root-mismatch",
 ] as const;

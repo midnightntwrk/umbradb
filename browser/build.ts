@@ -53,9 +53,7 @@
  * - `ignore-web-lock` takes no Web Lock (`./src/db/web-lock.ts`);
  * - `plain-json-reader` reads `json` and `jsonb` with `JSON.parse` instead of the lossless reader
  *   (`src/deterministic-postgresql/mapping.ts`'s `parseJsonLossless`);
- * - `foreign-request` makes the page request one URL beside the node (`./src/page.ts`);
- * - `restore-skips-contents-hash` makes the page's restore skip the backup's contents hash check
- *   (`./src/process-worker.ts`).
+ * - `foreign-request` makes the page request one URL beside the node (`./src/page.ts`).
  */
 
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -72,7 +70,7 @@ const BROWSER = join(REPOSITORY, "browser");
 const SRC = join(REPOSITORY, "src");
 
 /** A build that differs from the real one in one way, for a negative control (see the module comment). */
-export type BrowserControl = "" | "ignore-web-lock" | "plain-json-reader" | "foreign-request" | "restore-skips-contents-hash";
+export type BrowserControl = "" | "ignore-web-lock" | "plain-json-reader" | "foreign-request";
 
 /** What {@link buildBrowser} takes. */
 export interface BrowserBuildOptions {

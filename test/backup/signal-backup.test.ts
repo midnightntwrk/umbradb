@@ -22,7 +22,7 @@ import {
   tableHeights,
   tickerModule,
 } from "./backup-fixtures.js";
-import { recorderModule, writePausableConfig } from "./pause-fixtures.js";
+import { hashUnpausedAt, recorderModule, writePausableConfig } from "./pause-fixtures.js";
 import { chain, restoreRun } from "./restore-fixtures.js";
 import type { SignalEvent, SignalJob } from "./signal-backup.worker.js";
 
@@ -125,7 +125,7 @@ describe("a real SIGUSR2 to a running PGlite process", () => {
         worker.child.kill("SIGUSR2");
         const prefix = `backup on signal written to ${out}: height `;
         await worker.until(() => worker.lines().some((line) => line.startsWith(prefix)), "the backup written");
-        height = BigInt(/^backup on signal written to .*: height (\d+), /.exec(worker.lines().find((l) => l.startsWith(prefix)) as string)?.[1] as string);
+        height = BigInt(/^backup on signal written to .*: height (\d+)$/.exec(worker.lines().find((l) => l.startsWith(prefix)) as string)?.[1] as string);
         // It goes on: blocks keep committing after the backup.
         await worker.until(() => (worker.cursor() ?? 0n) >= height + 5n, `at height ${height + 5n}`);
         worker.child.kill("SIGTERM");
@@ -147,7 +147,7 @@ describe("a real SIGUSR2 to a running PGlite process", () => {
       expect(restored.stderr).toBe("");
       expect(restored.code).toBe(EXIT.ok);
       expect(await tableHeights(target)).toEqual(heightsAt(manifest.height));
-      expect(await hashOf(target)).toBe(manifest.contentsHash);
+      expect(await hashOf(target)).toBe(await hashUnpausedAt(project, PGLITE, height));
     },
     TEST_TIMEOUT_MS,
   );
@@ -179,7 +179,7 @@ describe("a real SIGUSR2 to a running PGlite process", () => {
         );
         run.child.kill("SIGUSR2");
         const deadline = Date.now() + PATIENCE_MS;
-        while (!run.stderr().includes(`backup on signal written to ${out}: height 5, contents hash `)) {
+        while (!run.stderr().includes(`backup on signal written to ${out}: height 5\n`)) {
           if (run.child.exitCode !== null || Date.now() > deadline) throw new Error(`no backup written:\n${run.stderr()}`);
           await sleep(25);
         }

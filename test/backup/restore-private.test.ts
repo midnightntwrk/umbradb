@@ -102,7 +102,7 @@ describe.each(BACKUP_BACKENDS)("a private process's backup on $name", (backend) 
       "public database and continues from its height + 1; one taken against another public database is refused with " +
       "private-binding-mismatch and the binding's details.reason, the target left empty",
     async () => {
-      const { bound, file, manifest } = taken();
+      const { bound, file, manifest, hash } = taken();
       expect(manifest).toMatchObject({ height: String(BACKUP_HEIGHT), start: String(PRIVATE_START) });
 
       // Another public database of the same chain — its core from S 2 —: the binding the backup's row records (S 1) is
@@ -131,7 +131,7 @@ describe.each(BACKUP_BACKENDS)("a private process's backup on $name", (backend) 
         heights: heightsFrom(BigInt(PRIVATE_START), BACKUP_HEIGHT),
         cursor: String(BACKUP_HEIGHT),
       });
-      expect(await privateHashOf(restoredInto.db)).toBe(manifest.contentsHash);
+      expect(await privateHashOf(restoredInto.db)).toBe(hash);
       const restoredHellos = (): string[] =>
         bound.core.lines.filter((line) => line.startsWith("transport: instance instance-restored "));
       if (backend.kind === "pglite") {

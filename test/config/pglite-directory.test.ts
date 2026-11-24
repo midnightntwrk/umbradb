@@ -213,7 +213,7 @@ describe("what writes a PGlite database creates its directory with any missing p
       expect(restored.stderr).toBe("");
       expect(restored.code).toBe(EXIT.ok);
       expect(restored.stdout).toContain(`created a new PGlite data directory ${target} (and 1 missing parent directory)`);
-      expect(restored.stdout).toContain(`height ${BACKUP_HEIGHT}, contents hash`);
+      expect(restored.stdout).toContain(`height ${BACKUP_HEIGHT}; the database resumes from ${BACKUP_HEIGHT + 1n}`);
       const [row] = await rowsIn(
         target,
         "SELECT max(height)::text AS h, (SELECT count(*) FROM ticker.rows)::text AS n FROM core_block_commit.blocks",

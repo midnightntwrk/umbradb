@@ -6,7 +6,6 @@ import { type CliProject, cliProject } from "../cli/cli-fixtures.js";
 import {
   BACKUP_BACKENDS,
   type BackupBackend,
-  hashOf,
   heightsAt,
   startTicker,
   tableHeights,
@@ -18,8 +17,7 @@ import {
  * The consistent backup's committed negative control: the same backup as `./backup.test.ts`'s "while blocks commit", on
  * PostgreSQL 18.6 and PGlite 0.5.10, but with the dump taken outside the manifest's snapshot (`BackupSeams`'
  * `outsideSnapshot`: the manifest's facts read and their read ended, ten more blocks committed, then the dump in a
- * snapshot of its own). Loaded into a new database, its tables are at another height than its manifest, and its
- * contents hash is not the manifest's. That is what the consistent-backup test would see if the backup did not take
+ * snapshot of its own). Loaded into a new database, its tables are at another height than its manifest. That is what the consistent-backup test would see if the backup did not take
  * both in one snapshot (PostgreSQL) or one job (PGlite).
  */
 
@@ -69,7 +67,6 @@ describe.each(BACKUP_BACKENDS)("negative control on $name", (backend) => {
       expect(heights).not.toEqual(heightsAt(manifest.height));
       expect(BigInt(heights.rows as string)).toBeGreaterThanOrEqual(BigInt(manifest.height) + 10n);
       expect(BigInt(heights.blocks as string)).toBeGreaterThan(BigInt(manifest.height));
-      expect(await hashOf(loaded)).not.toBe(manifest.contentsHash);
     },
     TEST_TIMEOUT_MS,
   );
