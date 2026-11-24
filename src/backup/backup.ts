@@ -12,8 +12,9 @@
  * - **PostgreSQL:** one read of the database API, a `REPEATABLE READ READ ONLY` transaction on a read connection. It
  *   reads the manifest's facts (`./facts.ts`: the cursor, the identity, the history, the migrations, the state root),
  *   refuses a private database without the opt-in, and exports its snapshot
- *   (`pg_export_snapshot()`). While the transaction stays open, it runs `pg_dump --snapshot=<id> --inserts --no-owner
- *   --no-privileges`, whose output follows the manifest line in the file. The database URL's password reaches
+ *   (`pg_export_snapshot()`). While the transaction stays open, it runs `pg_dump --snapshot=<id> --no-owner
+ *   --no-privileges`, whose output follows the manifest line in the file. Its tables' rows are `COPY … FROM stdin`
+ *   data, which loads many times faster than one `INSERT` per row. The database URL's password reaches
  *   `pg_dump` in its environment (`PGPASSWORD`), never on its command line.
  * - **PGlite:** one exclusive job of the database's queue (`exclusiveJob`), so commits wait. Inside the job, a read
  *   gets the facts, then the `pg_dump` of `@electric-sql/pglite-tools` runs on the engine. It adds `--inserts`; its
@@ -182,7 +183,6 @@ async function runPgDump(
 ): Promise<void> {
   const args = [
     "--format=plain",
-    "--inserts",
     "--no-owner",
     "--no-privileges",
     ...(snapshot === null ? [] : [`--snapshot=${snapshot}`]),

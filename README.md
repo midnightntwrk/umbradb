@@ -259,12 +259,12 @@ module test with it, on an in-memory chain; §18 lists its options, its handle, 
 
 ## Backup and restore
 
-**What a backup holds.** A `pg_dump` file in plain SQL (`--inserts --no-owner --no-privileges`): every table of the
-database at one committed height, so whole blocks only. Its first line is UmbraDB's manifest: the chain's genesis hash,
-S, the height and its block hash, the ledger state root (with `core-ledger-state`), the configuration history, the
-applied migrations with their checksums, and the PostgreSQL, UmbraDB and tool versions. Use a backup
-to move an indexer, or to start a new one mid-chain without syncing from genesis. To check that two databases agree,
-compare their digests and contents hashes (`/status`), not their files. Every backup file is created owner-only
+**What a backup holds.** A `pg_dump` file in plain SQL (`--no-owner --no-privileges`; on PGlite also `--inserts`):
+every table of the database at one committed height, so whole blocks only. Its first line is UmbraDB's manifest: the
+chain's genesis hash, S, the height and its block hash, the ledger state root (with `core-ledger-state`), the
+configuration history, the applied migrations with their checksums, and the PostgreSQL, UmbraDB and tool versions. Use
+a backup to move an indexer, or to start a new one mid-chain without syncing from genesis. To check that two databases
+agree, compare their digests and contents hashes (`/status`), not their files. Every backup file is created owner-only
 (`0600`); UmbraDB neither encrypts nor signs it, so storing, moving and encrypting backups is the operator's.
 
 **Taking one.**

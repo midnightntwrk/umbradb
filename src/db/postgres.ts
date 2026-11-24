@@ -45,6 +45,7 @@
  * the number tells. The read pool's sessions take no lock.
  */
 
+import type { Writable } from "node:stream";
 import postgres, { type Sql } from "postgres";
 import type { SslMode } from "../config/database-parts.js";
 import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
@@ -52,6 +53,7 @@ import { RepeatedStatement, type Statement, statementText } from "./repeated-sta
 import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
 import { commitRolledBack, handleClosed, queryTimeout, statementRefused, UmbraError } from "./errors.js";
+import { allowCopyIn } from "./copy-in.js";
 import { allowMultiStatement } from "./multi-statement.js";
 import { readTimeoutMs } from "./read-options.js";
 import { traceAdd, traceStatement } from "../trace/trace.js";
@@ -407,6 +409,71 @@ class Session {
   }
 
   /**
+   * Runs a `COPY … FROM stdin` with its data (`./copy-in.ts`), inside the session's transaction. When the server
+   * refuses the data, `postgres` 3.4.9 neither finishes the copy stream nor reports the error (`connection.js`:
+   * `ReadyForQuery` rejects a query already resolved with the stream). So a statement sent after the copy tells: the
+   * aborted transaction refuses it (`25P02`).
+   */
+  async copyIn(text: string, chunks: AsyncIterable<string>): Promise<void> {
+    const options = { simple: true } as unknown as postgres.UnsafeQueryOptions;
+    if (this.named !== undefined) await this.named;
+    this.checkUsable();
+    let stream: Writable;
+    try {
+      stream = await this.sql.unsafe(text, [], options).writable();
+    } catch (error) {
+      throw this.classified(error);
+    }
+    let lost: unknown;
+    stream.on("error", (error) => void (lost ??= error));
+    try {
+      for await (const chunk of chunks) {
+        // Each chunk flushed before the next, so the stream holds nothing when it ends and the driver closes it at once.
+        await new Promise<void>((resolve, reject) => stream.write(chunk, (error) => (error ? reject(error) : resolve())));
+      }
+    } catch (error) {
+      stream.destroy(error as Error);
+      throw lost === undefined ? error : this.classified(lost);
+    }
+    stream.end();
+    // The driver refuses any statement until it has closed the stream, which it does in `end`'s own turn.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (lost !== undefined) throw this.classified(lost);
+    try {
+      await this.sql.unsafe("SELECT 1", [], options);
+    } catch (error) {
+      const classified = this.classified(error);
+      if (classified.details.sqlstate !== "25P02") throw classified;
+      throw new UmbraError(
+        "database-error",
+        `PostgreSQL refused the data of ${text.slice(0, 200).replace(/;\s*$/, "")}; the server's log names why`,
+        { sqlstate: "25P02", reason: "copy-refused" },
+        { cause: error },
+      );
+    }
+  }
+
+  /** Refuses a statement once the session ended or was lost: the driver would open a new connection for it. */
+  private checkUsable(): void {
+    if (this.state === "ended") throw handleClosed("database");
+    if (this.state === "lost") {
+      throw new UmbraError("connection-lost", `the ${this.role} connection to PostgreSQL was lost`, {
+        connection: this.role,
+        cause: "lost-earlier",
+      });
+    }
+  }
+
+  /** A driver error as an {@link UmbraError}; a lost connection marks the session lost. */
+  private classified(error: unknown): UmbraError {
+    if (this.ended) return handleClosed("database");
+    if (error instanceof UmbraError) return error;
+    const classified = classifyDriverError(error, this.role);
+    if (classified.code === "connection-lost") this.state = "lost";
+    return classified;
+  }
+
+  /**
    * Sends a text to the server unless the session ended or was lost; a driver error as an {@link UmbraError}. A
    * statement that may change a table's columns counts as a schema change ({@link SchemaChanges}) once it settled: one
    * whose command tag says so, a writer's `ROLLBACK`, and a migration's `script` whatever it ran.
@@ -445,13 +512,7 @@ class Session {
     let answered: (() => void) | undefined;
     try {
       if (this.named !== undefined) await this.named;
-      if (this.state === "ended") throw handleClosed("database");
-      if (this.state === "lost") {
-        throw new UmbraError("connection-lost", `the ${this.role} connection to PostgreSQL was lost`, {
-          connection: this.role,
-          cause: "lost-earlier",
-        });
-      }
+      this.checkUsable();
       schemaChange = script;
       try {
         const prepare = !simple && (args.length > 0 || (alone && marked)) && this.prepares(text);
@@ -722,6 +783,10 @@ class Writer {
     allowMultiStatement(tx, async (sql) => {
       if (ended) throw handleClosed("transaction");
       await session.script(sql);
+    });
+    allowCopyIn(tx, async (sql, chunks) => {
+      if (ended) throw handleClosed("transaction");
+      await session.copyIn(sql, chunks);
     });
     let result: T;
     try {

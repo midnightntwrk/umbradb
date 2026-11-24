@@ -386,7 +386,7 @@ describe("pg_dump's command line and failures", () => {
     const args = readFileSync(`${log}.args`, "utf8");
     // No connection on the command line (the tests' login is `test`, its password `test`): libpq's environment has it.
     expect(args).not.toContain(password);
-    expect(args).toMatch(/^--format=plain\n--inserts\n--no-owner\n--no-privileges\n--snapshot=\S+\n$/);
+    expect(args).toMatch(/^--format=plain\n--no-owner\n--no-privileges\n--snapshot=\S+\n$/);
     expect(readFileSync(`${log}.password`, "utf8")).toBe(password);
     expect(readFileSync(`${log}.env`, "utf8")).toBe(
       `${parts.host}\n${parts.port}\n${parts.user}\n${parts.name}\n${parts.ssl}\n`,

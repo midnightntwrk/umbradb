@@ -305,8 +305,8 @@ export const ERROR_CODES = [
   "private-backup-refused",
   /**
    * A file that is not a backup of the format this build reads: no manifest line, a manifest of another format, or a
-   * dump a restore does not run (a `psql` meta-command other than `\restrict`/`\unrestrict`, a `COPY … FROM stdin`, a
-   * file ending inside a statement).
+   * dump a restore does not run (a `psql` meta-command other than `\restrict`/`\unrestrict`, a file ending inside a
+   * statement or a `COPY`'s data).
    */
   "backup-format-unknown",
   // The restore's refusals (`src/backup/restore.ts`), in its order: before loading, then after.

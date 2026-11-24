@@ -376,7 +376,8 @@ loop itself with `pause()` and `resume()`.
 
 ### What a backup holds
 
-Every table of the database, as plain SQL (`--inserts --no-owner --no-privileges`), at the manifest's height — tables
+Every table of the database, as plain SQL (`--no-owner --no-privileges`, rows as `COPY` data; on PGlite, whose
+`pg_dump` adds `--inserts`, as `INSERT`s), at the manifest's height — tables
 declared `deterministic: false` with their rows and their sequences' positions. A sequence is not transactional:
 taken beside a running indexer on PostgreSQL, its position in the file can be ahead of its table's rows (never behind
 them), so values a restored indexer gives such a column may skip some numbers.
@@ -416,7 +417,7 @@ configuration's node to check the chain. It refuses, and leaves the target as it
 | Code | Why |
 |---|---|
 | `restore-target-not-empty` | the target holds a schema, or anything in `public` |
-| `backup-format-unknown` | the file is no backup of format 1, or its SQL holds what a restore does not run (a `psql` meta-command other than `\restrict`/`\unrestrict`, a `COPY … FROM stdin`, a cut-off end) |
+| `backup-format-unknown` | the file is no backup of format 1, or its SQL holds what a restore does not run (a `psql` meta-command other than `\restrict`/`\unrestrict`, a cut-off end) |
 | `backup-history-mismatch` | the configuration's S or its history up to the backup's height differs from the backup's |
 | `backup-build-mismatch` | the build lacks the version of an entry at the backup's height + 1, or a migration the backup applied |
 | `backup-genesis-mismatch` | the node serves another chain |
