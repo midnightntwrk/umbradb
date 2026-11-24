@@ -249,7 +249,7 @@ describe.each(BACKUP_BACKENDS)("on $name: every backup file is 0600 from creatio
       } finally {
         watch.stop();
       }
-      expect(lines.some((line) => line.startsWith(`backup at stop written to ${place.out}: height 6, `))).toBe(true);
+      expect(lines.includes(`backup at stop written to ${place.out}: height 6`)).toBe(true);
       expect(problemsAt(place, watch.observations())).toEqual([]);
     },
     TEST_TIMEOUT_MS,
