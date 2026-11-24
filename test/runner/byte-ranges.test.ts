@@ -64,6 +64,8 @@ describe("parseIfMatch", () => {
     expect(parseIfMatch("v1", "required")).toBeUndefined();
     expect(parseIfMatch("v1", "optional")).toEqual(["v1"]);
     expect(parseIfMatch('"v1"', "optional")).toEqual(["v1"]);
+    expect(parseIfMatch("a,b", "optional")).toBeUndefined();
+    expect(parseIfMatch('"a,b"', "optional")).toEqual(["a,b"]);
   });
 
   it("refuses what is no list", () => {

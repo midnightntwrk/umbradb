@@ -636,7 +636,7 @@ counts and queue (after a restart, for one).
   - **`etag`** is sent as the `ETag`: give one that changes whenever the bytes do (a content hash). A request whose
     `If-Match` header or `ifMatch` parameter does not name it is refused 412 `precondition-failed`, so a client reading
     in ranges never mixes two versions. The parameter takes the header's form (`*`, `"9f2c…", "41ab…"`) or one
-    tag bare (`9f2c…`).
+    tag bare (`9f2c…`; quote a tag that holds a comma).
   - Your input may not declare `range` or `ifMatch`: UmbraDB reads them itself, so a transport without headers can
     send them.
 

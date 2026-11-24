@@ -64,15 +64,15 @@ export function resolveByteRanges(specs: readonly ByteRangeSpec[], size: number)
 
 /** One entity-tag of a list, weak or strong, and the comma after it (RFC 9110 §8.8.3). */
 const ENTITY_TAG = /^[ \t]*(W\/)?"([\x21\x23-\x7e]*)"[ \t]*(,|$)/;
-/** An entity-tag's characters, `"` aside. */
-const BARE_TAG = /^[\x21\x23-\x7e]+$/;
+/** A bare tag's characters: an entity-tag's, without `"` or `,`, so a list is never read as one tag. */
+const BARE_TAG = /^[\x21\x23-\x2b\x2d-\x7e]+$/;
 
 /** An `If-Match`: any entity-tag (`*`), or the strong ones it names; a weak one never matches, so it is dropped. */
 export type IfMatch = "*" | readonly string[];
 
 /**
  * The `If-Match` of `text` (§13.1.1), or undefined when it is none. The parameter may also be one tag without its
- * quotes (`9f2c…`), as `range` may leave out `bytes=`.
+ * quotes (`9f2c…`) and commas, as `range` may leave out `bytes=`.
  */
 export function parseIfMatch(text: string, quotes: "required" | "optional"): IfMatch | undefined {
   const trimmed = text.trim();
