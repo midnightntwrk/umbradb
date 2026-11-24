@@ -807,4 +807,62 @@ describe("the ledger worker's engine", () => {
     );
     void engine;
   });
+
+  it("reloads its committed state from its key every reloadEvery blocks, freed first, never with a block pending or without a store", { timeout: LONG }, async () => {
+    expect(() => new LedgerEngine({ load: loadLedgerPackage, reloadEvery: -1 })).toThrow(RangeError);
+    expect(() => new LedgerEngine({ load: loadLedgerPackage, reloadEvery: 1.5 })).toThrow(RangeError);
+    const events: string[] = [];
+    const load: LedgerLoader = async (ledger, options) => {
+      const adapter = await loadLedgerPackage(ledger, options);
+      return {
+        ...adapter,
+        load: (key, given) => {
+          events.push(`load ${hex(key)}`);
+          return adapter.load(key, given);
+        },
+        dispose: (state) => {
+          events.push("dispose");
+          adapter.dispose(state);
+        },
+      };
+    };
+    const stored = new Map<string, StoredNode>();
+    const store = { get: (key: Uint8Array) => stored.get(hex(key)) ?? null };
+    // Every 2 committed blocks (block 0's counts); the oracle never reloads.
+    const { engine, zero } = await atGenesis(new LedgerEngine({ load, store, reloadEvery: 2 }));
+    const { engine: oracle } = await atGenesis(new LedgerEngine({ load: loadLedgerPackage, store, reloadEvery: 0 }));
+    for (const node of zero.batch.inserts) stored.set(hex(node.key), node);
+    const step = async (height: bigint, transactions: Uint8Array[] = [], commit = true): Promise<AppliedState> => {
+      if (transactions.length > 0) await Promise.all([engine.parse("v9", at(height), transactions), oracle.parse("v9", at(height), transactions)]);
+      const applied = await engine.apply(applyBlock(height, transactions.length));
+      for (const node of applied.batch.inserts) stored.set(hex(node.key), node);
+      expect(hex(applied.stateRoot)).toBe(hex((await oracle.apply(applyBlock(height, transactions.length))).stateRoot));
+      if (commit) expect([engine.commit(at(height)), oracle.commit(at(height))]).toEqual([true, true]);
+      return applied;
+    };
+    const one = await step(1n);
+    events.length = 0;
+    const reloaded = await engine.load({ ledger: "v9", ...at(1n), stateKey: one.stateKey });
+    expect(reloaded.loaded).toBe(true);
+    expect(hex(reloaded.stateRoot)).toBe(hex(one.stateRoot));
+    // Freed before it is loaded again, so the new state cannot reach the old one's loaded nodes.
+    expect(events).toEqual(["dispose", `load ${hex(one.stateKey)}`]);
+    // The count starts again.
+    expect((await engine.load({ ledger: "v9", ...at(1n), stateKey: one.stateKey })).loaded).toBe(false);
+    // Blocks on the reloaded state are the oracle's, a transaction's included.
+    await step(2n, [zswapOutputTransaction(RAW.v9)]);
+    const three = await step(3n);
+    // Due, but block 4 is pending: kept as it is.
+    const four = await step(4n, [], false);
+    events.length = 0;
+    expect((await engine.load({ ledger: "v9", ...at(3n), stateKey: three.stateKey })).loaded).toBe(false);
+    expect(events).toEqual([]);
+    expect([engine.commit(at(4n)), oracle.commit(at(4n))]).toEqual([true, true]);
+    expect((await engine.load({ ledger: "v9", ...at(4n), stateKey: four.stateKey })).loaded).toBe(true);
+    const five = await step(5n);
+    expect((await oracle.load({ ledger: "v9", ...at(5n), stateKey: five.stateKey })).loaded).toBe(false);
+    // Without a store (the main thread's engine), never.
+    const { engine: plain } = await atGenesis(new LedgerEngine({ load: loadLedgerPackage, reloadEvery: 1 }));
+    expect((await plain.load({ ledger: "v9", ...at(0n), stateKey: zero.stateKey })).loaded).toBe(false);
+  });
 });
