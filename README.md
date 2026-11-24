@@ -202,8 +202,10 @@ transport reader's login.
 - `umbradb config check <file> [--database]`: type-checks and validates the file without starting anything; with
   `--database`, also checks it against the configuration history of the database the file names, read-only.
 - `umbradb backup --out <file> [--config <file>]`: writes a backup of the configuration's database.
-- `umbradb restore <file> [--config <file>]`: restores a backup into the configuration's database, which must be
-  empty.
+- `umbradb restore <file> [--config <file>] [--overwrite-history]`: restores a backup into the configuration's
+  database, which must be empty.
+- `umbradb history export [--out <file>] [--config <file>]`: writes the database's recorded history to the
+  configuration's history file ([Recorded history](#recorded-history)).
 - `umbradb --help`: the usage.
 
 `--config` defaults to `umbradb.config.ts` in the working directory.
@@ -302,8 +304,9 @@ they do not make a hostile file safe. The [threat model](docs/THREAT_MODEL.md#ba
 file can do.
 
 The target must be empty: a new PostgreSQL database, or a PGlite directory with no database in it. The configuration
-must be the one the backup's indexer ran with, up to the backup's height (later revisions are allowed), and its build
-must carry the versions and migrations the backup's database used. The command reads the configuration's node, and
+must be the one the backup's indexer ran with, up to the backup's height (later revisions are allowed), unless it
+names a history file ([Recorded history](#recorded-history)), and its build must carry the versions and migrations the
+backup's database used. The command reads the configuration's node, and
 refuses, leaving the target as it was, with:
 
 | Code | Why |
@@ -321,6 +324,27 @@ The first six are checked before loading; the last two after, inside the restore
 back. An interrupted restore leaves the target empty. Then `umbradb run` with the same configuration resumes from the
 backup's height + 1. A private process's backup is restored the same way with the private configuration, checked
 against its public database instead of a node ([operator guide](docs/operator-guide.md#restoring-a-backup)).
+
+### Recorded history
+
+A database records every revision it ran, and its configuration must normally list them all, with their versions and
+data. A configuration can instead name a history file and list only what it runs now:
+
+```ts
+export default defineConfig({
+  history: "./umbradb.history.json", // relative to this file
+  entries: [coreEntry({ start: 0, config: { network: "preview", node: "wss://…", database } }), …],
+});
+```
+
+- **`umbradb restore`** writes the backup's history there once the restore commits. It refuses
+  (`backup-history-mismatch`) when a file there holds another history, unless given `--overwrite-history`.
+- **`umbradb history export`** writes the database's own history there. Stop the process first, then export and
+  start the new build.
+- **At startup**, every revision up to the file's height comes from the file. Each entry of the configuration then
+  continues the recorded revision when its version and data are the same, and otherwise starts at the height after
+  the file's. A recorded module the configuration no longer lists stops at that height. Entries starting above it are
+  kept as written.
 
 ## Admin endpoints and process states
 

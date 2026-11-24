@@ -39,10 +39,11 @@ import { commandBuild } from "../cli/build-modules.js";
 import { DEFAULT_ADMIN_ADDRESS, type ProcessSide } from "../config/core-settings.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { UmbraError } from "../db/errors.js";
-import { type PlainData, plainData } from "../config/plain-data.js";
+import { type PlainData, type PlainObject, plainData } from "../config/plain-data.js";
 import { secretStrings } from "../config/redact.js";
 import { type LoweredStart, withLatestStarts } from "../config/latest-start.js";
 import { processCoreEntry } from "../config/process.js";
+import { type RecordedHistory, withRecordedHistory } from "../config/recorded-history.js";
 import {
   type CheckedConfig,
   type CheckedEntry,
@@ -230,6 +231,8 @@ export interface ConfigStageInput {
   readonly side?: ProcessSide;
   /** The negative controls' choice of the process's `core` revision; `processCoreEntry` unless given. */
   readonly processCore?: (config: CheckedConfig) => CheckedEntry;
+  /** The recorded history file's history, which supplies the revisions up to its height (`withRecordedHistory`). */
+  readonly history?: RecordedHistory | null;
 }
 
 /** What {@link resolveConfig} gives. */
@@ -296,16 +299,22 @@ function surfacesOf(data: unknown, core: CheckedEntry, side: ProcessSide): Surfa
  */
 export function resolveConfig(input: ConfigStageInput): ResolvedConfig {
   const side = resolveSide(input.data, input.side);
-  const data = plainData(input.data, input.file ?? undefined);
-  const validation: ConfigInput = {
+  const written = plainData(input.data, input.file ?? undefined);
+  const validationOf = (data: PlainData): ConfigInput => ({
     config: { ...(input.file === null ? {} : { file: input.file }), data },
     declarations: input.declarations,
     side,
-  };
-  const secrets = configSecrets(validation);
+  });
+  const secrets = configSecrets(validationOf(written));
   try {
     const declarations = [...input.declarations.backbone, ...input.declarations.core, ...input.declarations.user];
-    const { config: checked, lowered } = withLatestStarts(validateConfig(validation), declarations);
+    let data = written;
+    if (input.history !== undefined && input.history !== null) {
+      const versions = new Map(declarations.map((declaration) => [declaration.id, declaration.version]));
+      const merged = withRecordedHistory(written as PlainObject, validateConfig(validationOf(written)), input.history, versions);
+      data = plainData(merged, input.file ?? undefined);
+    }
+    const { config: checked, lowered } = withLatestStarts(validateConfig(validationOf(data)), declarations);
     const core = (input.processCore ?? processCoreEntry)(checked);
     return Object.freeze({ checked, side, core, surfaces: surfacesOf(data, core, side), lowered });
   } catch (error) {
@@ -332,6 +341,8 @@ export interface ResolveInput {
   readonly declarations?: DeclarationSet;
   /** {@link ConfigStageInput.processCore}. */
   readonly processCore?: (config: CheckedConfig) => CheckedEntry;
+  /** {@link ConfigStageInput.history}. */
+  readonly history?: RecordedHistory | null;
 }
 
 /** What {@link resolve} gives. */
@@ -362,6 +373,7 @@ export function resolve(input: ResolveInput): Resolved {
     declarations,
     side,
     ...(input.processCore === undefined ? {} : { processCore: input.processCore }),
+    ...(input.history === undefined || input.history === null ? {} : { history: input.history }),
   });
   return Object.freeze({
     ...config,

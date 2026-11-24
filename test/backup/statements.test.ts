@@ -98,11 +98,12 @@ describe("splitting a dump into statements", () => {
 
 describe("restore's arguments", () => {
   it.each([
-    [[], "restore takes one backup file: umbradb restore <file> [--config <file>]"],
-    [["a", "b"], "restore takes one backup file: umbradb restore <file> [--config <file>]"],
+    [[], "restore takes one backup file: umbradb restore <file> [--config <file>] [--overwrite-history]"],
+    [["a", "b"], "restore takes one backup file: umbradb restore <file> [--config <file>] [--overwrite-history]"],
     [["a", "--config", "c", "--config", "d"], "restore takes --config once"],
     [["a", "--config", ""], "--config takes a value: the configuration file"],
     [["a", "--out", "x"], "unknown option --out of restore"],
+    [["a", "--overwrite-history=yes"], "unknown option --overwrite-history of restore"],
   ])("refuses %j", (args, problem) => {
     expect(restoreArguments(args)).toBe(problem);
   });
@@ -110,5 +111,6 @@ describe("restore's arguments", () => {
   it("takes one file and at most one --config", () => {
     expect(restoreArguments(["a.backup"])).toEqual({ file: "a.backup" });
     expect(restoreArguments(["--config", "c.ts", "a.backup"])).toEqual({ file: "a.backup", config: "c.ts" });
+    expect(restoreArguments(["a.backup", "--overwrite-history"])).toEqual({ file: "a.backup", overwriteHistory: true });
   });
 });

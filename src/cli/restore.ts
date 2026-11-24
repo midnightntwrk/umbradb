@@ -1,5 +1,5 @@
 /**
- * `umbradb restore <file> [--config <file>]`: restores a backup into the database the configuration file names
+ * `umbradb restore <file> [--config <file>] [--overwrite-history]`: restores a backup into the database the configuration file names
  * (`./configured.ts`), which must be empty, through `src/backup/restore.ts` (`restoreBackup`). This covers the checks
  * before loading, the file's SQL in one transaction on the writer connection, the owners and grants, and the contents
  * hash and the ledger state root, checked before the commit.
@@ -30,7 +30,10 @@ import { parseArgs } from "node:util";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
 import { nodeOptionsOf } from "../backbone/core-chain/core-chain.js";
 import { openPublicSide, type PublicDatabase } from "../backbone/core-private-source/public-database.js";
+import { firstLine } from "../backup/backup.js";
+import { readManifestLine } from "../backup/manifest.js";
 import { type RestoreChain, type RestoreSeams, restoreBackup } from "../backup/restore.js";
+import { type RecordedHistory, sameHistory } from "../config/recorded-history.js";
 import type { PlainObject } from "../config/plain-data.js";
 import { redactor } from "../config/redact.js";
 import { UmbraError } from "../db/errors.js";
@@ -38,30 +41,50 @@ import { NodeClient } from "../node/client.js";
 import type { TransportTls } from "../private/core-transport.js";
 import type { BlockSource } from "../runner/block-source.js";
 import { type CommandConfig, commandTarget, openRestoreTarget, readCommandConfig } from "./configured.js";
+import { manifestHistory, writeHistoryFile } from "./history.js";
+
+/** The backup's recorded history; null when its manifest cannot be read, which the restore then refuses. */
+async function backupHistory(file: string): Promise<RecordedHistory | null> {
+  try {
+    return manifestHistory(readManifestLine(await firstLine(file)));
+  } catch {
+    return null;
+  }
+}
 
 /** `restore`'s arguments — one file, at most one `--config <file>`, nothing else —, or what is wrong with them. */
-export function restoreArguments(args: readonly string[]): { readonly file: string; readonly config?: string } | string {
+export function restoreArguments(
+  args: readonly string[],
+): { readonly file: string; readonly config?: string; readonly overwriteHistory?: true } | string {
   const { tokens } = parseArgs({
     args: [...args],
-    options: { config: { type: "string" } },
+    options: { config: { type: "string" }, "overwrite-history": { type: "boolean" } },
     allowPositionals: true,
     strict: false,
     tokens: true,
   });
   const files: string[] = [];
   const configs: (string | undefined)[] = [];
+  let overwriteHistory = false;
   for (const token of tokens) {
     if (token.kind === "positional") files.push(token.value);
     else if (token.kind === "option") {
-      if (token.name !== "config") return `unknown option ${token.rawName} of restore`;
-      configs.push(token.value);
+      if (token.name === "overwrite-history" && token.value === undefined) overwriteHistory = true;
+      else if (token.name === "config") configs.push(token.value);
+      else return `unknown option ${token.rawName} of restore`;
     }
   }
-  if (files.length !== 1) return "restore takes one backup file: umbradb restore <file> [--config <file>]";
+  if (files.length !== 1) {
+    return "restore takes one backup file: umbradb restore <file> [--config <file>] [--overwrite-history]";
+  }
   if (configs.length > 1) return "restore takes --config once";
   const [config] = configs;
   if (configs.length === 1 && (config === undefined || config === "")) return "--config takes a value: the configuration file";
-  return config === undefined ? { file: files[0] as string } : { file: files[0] as string, config };
+  return {
+    file: files[0] as string,
+    ...(config === undefined ? {} : { config }),
+    ...(overwriteHistory ? { overwriteHistory: true as const } : {}),
+  };
 }
 
 /** What the tests replace. */
@@ -86,6 +109,8 @@ export interface RestoreCommandOptions {
   readonly log?: (line: string) => void;
   /** Where what the restore did besides restoring is told: a PGlite directory it created. */
   readonly say?: (line: string) => void;
+  /** Replaces a history file that holds another history than the backup's. */
+  readonly overwriteHistory?: boolean;
 }
 
 /** What `umbradb restore` restored, or why it did not. */
@@ -150,13 +175,25 @@ export async function runRestore(options: RestoreCommandOptions, seams: RestoreC
   let redact = redactor([]);
   let close: (() => Promise<void>) | undefined;
   try {
-    const config = await readCommandConfig({ file: options.config, cwd: options.cwd });
+    const file = resolve(options.cwd, options.file);
+    const history = await backupHistory(file);
+    const config = await readCommandConfig({ file: options.config, cwd: options.cwd, ...(history === null ? {} : { history }) });
     redact = config.redact;
+    // The configuration's history file is written from the backup; one holding another history is left alone.
+    const historyFile = history === null ? null : config.historyFile;
+    const differs = config.existingHistory !== null && !sameHistory(config.existingHistory, history as RecordedHistory);
+    if (historyFile !== null && differs && options.overwriteHistory !== true) {
+      throw new UmbraError(
+        "backup-history-mismatch",
+        `the history file ${historyFile} holds another history than the backup's: remove it, or restore with ` +
+          "--overwrite-history",
+        { reason: "history-file-differs", file: historyFile },
+      );
+    }
     const log = (line: string) => options.log?.(redact.text(`umbradb restore: ${line}`));
     const target = commandTarget(config, options.cwd);
     const { chain, close: closeChain } = chainOf(config, seams, log);
     close = closeChain;
-    const file = resolve(options.cwd, options.file);
     const { manifest } = await restoreBackup(
       {
         file,
@@ -170,9 +207,19 @@ export async function runRestore(options: RestoreCommandOptions, seams: RestoreC
       seams.restore,
     );
     const next = BigInt(manifest.height) + 1n;
-    const line =
+    let line =
       `umbradb restore: restored ${file}: height ${manifest.height}, contents hash ${manifest.contentsHash}; the ` +
       `database resumes from ${next}`;
+    if (historyFile !== null) {
+      try {
+        await writeHistoryFile(historyFile, history as RecordedHistory);
+        line += `; its history is in ${historyFile}`;
+      } catch (error) {
+        const why = `the database is restored, but its history could not be written to ${historyFile}: ${String(error)}; ` +
+          "write it with umbradb history export";
+        return { restored: false, error, line: redact.text(`umbradb restore: ${why}`) };
+      }
+    }
     return { restored: true, line: redact.text(line) };
   } catch (error) {
     const what = error instanceof UmbraError ? `${error.code}: ${error.message}` : `failed: ${String(error)}`;

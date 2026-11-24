@@ -22,6 +22,8 @@ export interface LoadedConfig {
   readonly file: string;
   readonly data: unknown;
   readonly modules: readonly unknown[];
+  readonly historyFile: string | null;
+  readonly history: null;
 }
 
 /** The refusal of every file the browser build is asked for (see the module comment). */
@@ -43,6 +45,8 @@ export interface ImportedConfig {
   readonly file: string;
   readonly data: unknown;
   readonly exports: Readonly<Record<string, unknown>>;
+  readonly historyFile: string | null;
+  readonly history: null;
 }
 
 /** Refuses, as {@link loadConfig} does: the browser build imports no configuration file. */
@@ -67,5 +71,10 @@ export function configPath(_file: string | URL, _cwd: string): string {
 
 /** Refuses, as {@link loadConfig} does: the browser build names no configuration file. */
 export function configModuleUrl(_path: string): URL {
+  throw noFile();
+}
+
+/** Refuses, as {@link loadConfig} does: the browser build reads no history file. */
+export async function readHistoryFile(_file: string): Promise<null> {
   throw noFile();
 }

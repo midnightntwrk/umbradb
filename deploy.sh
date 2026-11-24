@@ -155,6 +155,7 @@ on_host() {
   log "instances"
   install -m 0644 -o umbradb -g umbradb "$APP/src/deploy/umbradb.config.ts" "$APP/umbradb.config.ts"
   local net
+  for net in "${NETWORKS[@]}"; do export_history "$net"; done
   for net in "${NETWORKS[@]}"; do
     if enabled "$net"; then
       umbradb "$net" config check "$APP/umbradb.config.ts" || die "$APP/umbradb.config.ts fails for $net (above)"
@@ -205,6 +206,24 @@ restore_progress() {
   done
 }
 
+# export_history <network>: rewrites the history file from the database, instances stopped, so this build's entries
+# run from the height after it. A database with nothing committed yet has none.
+export_history() {
+  local net=$1 history=$APP/history/$1.json out
+  install -d -o umbradb -g umbradb "$APP/history"
+  # The old deploy script's files have no format: the export replaces them.
+  if [[ -f $history ]] && ! grep -q '"format"' "$history"; then mv "$history" "$history.legacy"; fi
+  if out=$(umbradb "$net" history export --config "$APP/umbradb.config.ts" 2>&1); then
+    echo "$out"
+    rm -f "$history.legacy"
+    return
+  fi
+  if [[ -f $history.legacy ]]; then mv "$history.legacy" "$history"; fi
+  if [[ $out == *no-committed-height* ]]; then echo "$net: nothing committed yet, no history"; return; fi
+  echo "$out" >&2
+  die "could not export $net's history (above)"
+}
+
 on_host_start() {
   [[ $EUID -eq 0 ]] || die "--on-host-start runs as root"
   local net=$1
@@ -230,18 +249,15 @@ on_host_restore() {
   if enabled "$net" || systemctl is-active -q "umbradb@$net"; then die "umbradb@$net is on: ./deploy.sh stop $net first"; fi
   [[ -f $file ]] || die "no file $file on the host"
   runuser -u umbradb -- test -r "$file" || die "the umbradb user cannot read $file"
-  # The backup's core revisions, from the manifest on its first line: the configuration keeps those of an earlier build.
-  local history=$APP/history/$net.json
+  # The restore replaces the history file only once it commits.
   install -d -o umbradb -g umbradb "$APP/history"
-  (cd "$APP" && as_umbradb node "$APP/src/scripts/core-history-from-backup.mjs" "$(realpath "$file")" "$history")
   log "restoring $file into umbradb_$net"
   # The progress in the background, so the restore keeps the terminal (and Ctrl-C).
   restore_progress "$(realpath "$file")" "$net" &
   local progress=$!
   # shellcheck disable=SC2064 # the pid now: $progress is gone by the time the trap runs
   trap "kill $progress 2> /dev/null || true" EXIT
-  if ! umbradb "$net" restore "$(realpath "$file")" --config "$APP/umbradb.config.ts"; then
-    rm -f "$history"
+  if ! umbradb "$net" restore "$(realpath "$file")" --config "$APP/umbradb.config.ts" --overwrite-history; then
     die "restore failed: umbradb_$net is unchanged"
   fi
   log "restored: ./deploy.sh start $net"

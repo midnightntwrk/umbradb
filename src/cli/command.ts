@@ -13,8 +13,10 @@
  *.
  * - `umbradb backup --out <file> [--config <file>]` writes a backup of the configuration file's database
  *   (`./backup.ts`): exit 0 once written, 1 when refused (nothing written).
- * - `umbradb restore <file> [--config <file>]` restores a backup into the configuration file's database, which must be
+ * - `umbradb restore <file> [--config <file>] [--overwrite-history]` restores a backup into the configuration file's database, which must be
  *   empty (`./restore.ts`): exit 0 once committed, 1 when refused (nothing committed).
+ * - `umbradb history export [--out <file>] [--config <file>]` writes the database's recorded history to the
+ *   configuration's history file (`./history.ts`): exit 0 once written, 1 when refused.
  * - {@link EXIT}`.unavailable` (3) is the status of a command a build does not provide. Every command of the command
  *   line is built now, so none exits with it.
  * - Anything else (no argument, an unknown command, a wrong argument of `config check` or `run`) prints the usage on
@@ -37,6 +39,7 @@ import { redactor } from "../config/redact.js";
 import { configCheck, errorText } from "./config-check.js";
 import type { BackupSeams } from "../backup/backup.js";
 import { backupArguments, runBackup } from "./backup.js";
+import { historyExportArguments, runHistoryExport } from "./history.js";
 import { type RestoreCommandSeams, restoreArguments, runRestore } from "./restore.js";
 import { type RunSeams, runFailed, runProcess } from "./run.js";
 import { fileTraceSink, TRACE_STEPS_VARIABLE, TRACE_VARIABLE } from "../trace/file-sink.js";
@@ -58,8 +61,11 @@ Commands:
       against the configuration history of the database it configures, read-only.
   umbradb backup --out <file> [--config <file>]
       Back up the configuration's database (default umbradb.config.ts): a pg_dump file with its manifest.
-  umbradb restore <file> [--config <file>]
-      Restore a backup into the configuration's database, which must be empty (default umbradb.config.ts).
+  umbradb restore <file> [--config <file>] [--overwrite-history]
+      Restore a backup into the configuration's database, which must be empty (default umbradb.config.ts), and
+      write its history to the configuration's history file; --overwrite-history replaces one holding another.
+  umbradb history export [--out <file>] [--config <file>]
+      Write the configuration's database's recorded history to the configuration's history file, or --out.
   umbradb --help
       Print this usage.
 
@@ -262,10 +268,30 @@ export function restoreCommand(seams: RestoreCommandSeams = {}): CommandHandler 
         cwd: io.cwd,
         log: (line) => io.stderr(`${line}\n`),
         say: (line) => io.stdout(`${line}\n`),
+        ...(parsed.overwriteHistory === true ? { overwriteHistory: true } : {}),
       },
       seams,
     );
     if (outcome.restored) {
+      io.stdout(`${outcome.line}\n`);
+      return EXIT.ok;
+    }
+    io.stderr(`${outcome.line}\n`);
+    return EXIT.failed;
+  };
+}
+
+/** `umbradb history export` (`./history.ts`): exit {@link EXIT}`.ok` with the line it wrote, {@link EXIT}`.failed` with why. */
+export function historyCommand(): CommandHandler {
+  return async (args, io) => {
+    const [sub, ...rest] = args;
+    if (sub !== "export") {
+      return usage(io, sub === undefined ? "history takes a command: history export" : `unknown command history ${sub}`);
+    }
+    const parsed = historyExportArguments(rest);
+    if (typeof parsed === "string") return usage(io, parsed);
+    const outcome = await runHistoryExport({ out: parsed.out, config: parsed.config, cwd: io.cwd });
+    if (outcome.written) {
       io.stdout(`${outcome.line}\n`);
       return EXIT.ok;
     }
@@ -280,6 +306,7 @@ export const COMMANDS: Readonly<Record<string, CommandHandler>> = Object.freeze(
   config: configCommand(),
   backup: backupCommand(),
   restore: restoreCommand(),
+  history: historyCommand(),
 });
 
 /** Runs the command `argv` (the arguments after `umbradb`) with `commands` and resolves with its exit status. */
