@@ -10,7 +10,7 @@ import {
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
 import { UmbraError } from "../../src/db/errors.js";
-import { build, checked, CORE, CORE_DATA, M_1_0, N, Simulation, withProcess } from "./history-fixtures.js";
+import { build, checked, CORE, CORE_DATA, core, M_1_0, N, Simulation, withProcess } from "./history-fixtures.js";
 
 const HEIGHT = 50n;
 const M_DATA = { limit: 10, mode: "full" };
@@ -117,6 +117,19 @@ describe("withRecordedHistory", () => {
     const changed = merged([CORE, M_1_0.entry({ start: 0, stop: 80, config: { limit: 20 } })], rows, build([M_1_0]));
     expect(changed.at("m")).toEqual([[10, 80, true], [51, 80, true]]);
     expect(changed.writes).toEqual([["m", 51]]);
+  });
+
+  it("keeps the core's stop at or below the height, where the process then stops: it bounds no revision", () => {
+    const rows = recordedBy([CORE, M_1_0.entry({ start: 10, config: {} })], [M_1_0]);
+    const m = M_1_0.entry({ start: 0, config: {} });
+    // A run that stopped at the height the history was exported at, restarted with the same configuration.
+    const at = merged([core(0, {}, Number(HEIGHT)), m], rows, build([M_1_0]));
+    expect(at.at("core")).toEqual([[0, Number(HEIGHT), true]]);
+    expect(at.writes).toEqual([]);
+    // Changed data too: no revision starts after the height, since the process stops before it.
+    const below = merged([core(0, { retainStates: 10 }, 40), m], rows, build([M_1_0]));
+    expect(below.at("core")).toEqual([[0, 40, true]]);
+    expect(below.writes).toEqual([]);
   });
 
   it("keeps a new module's entry starting above the height as written, with nothing at the height after", () => {

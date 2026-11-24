@@ -108,6 +108,7 @@ function unrecorded(raw: PlainObject, template: CheckedEntry): PlainObject {
  * - the configuration's entry that runs at the height after continues the last recorded revision when its version and
  *   data are the same, and starts at that height otherwise;
  * - a recorded id the configuration no longer runs stops at the height;
+ * - the core's stop, operational, is kept wherever it is: at or below the height, on the last recorded revision;
  * - the configuration's entries starting above the height are kept as written.
  * `checked` is `data` validated; `buildVersions` maps each module id of the build to its version.
  */
@@ -131,8 +132,11 @@ export function withRecordedHistory(
       .sort((a, b) => a.start - b.start);
     const later = configured.filter((entry) => BigInt(entry.start) > height).map((entry) => raw[entry.index] as PlainObject);
     const covering = configured.filter((entry) => BigInt(entry.start) <= height).at(-1);
+    // The core's stop is operational, so one at or below the height still runs it (the process then stops at once).
     const current =
-      covering !== undefined && covering.buildVersion && (covering.stop === null || BigInt(covering.stop) > height)
+      covering !== undefined &&
+      covering.buildVersion &&
+      (id === CORE_ENTRY_ID || covering.stop === null || BigInt(covering.stop) > height)
         ? covering
         : undefined;
     const template = current ?? configured.find((entry) => entry.buildVersion);
@@ -173,7 +177,9 @@ export function withRecordedHistory(
     }
     if (current !== undefined && !continues) {
       const stop = current.stop === null ? null : BigInt(current.stop);
-      entries.push({ ...withoutStop(raw[current.index] as PlainObject), ...heights(height + 1n, stop) });
+      // A core stop at or below the height never reaches a revision after it: it goes on the last recorded one.
+      if (stop !== null && stop <= height) (entries.at(-1) as Record<string, PlainData>).stop = Number(stop);
+      else entries.push({ ...withoutStop(raw[current.index] as PlainObject), ...heights(height + 1n, stop) });
     }
     entries.push(...later);
   }
