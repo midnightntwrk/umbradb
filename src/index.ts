@@ -87,7 +87,18 @@ export {
   type ProcessContext,
   type Revision,
 } from "./modules/declaration.js";
-export { defineRoute, invalidRequest, type Route, type RouteContext, RouteError, type RouteErrorKind } from "./modules/route.js";
+export {
+  type BinaryFile,
+  type BinaryRoute,
+  binaryData,
+  defineBinaryRoute,
+  defineRoute,
+  invalidRequest,
+  type Route,
+  type RouteContext,
+  RouteError,
+  type RouteErrorKind,
+} from "./modules/route.js";
 export type { BlockRef } from "./runner/block-source.js";
 export { answerChainData, chainDataHeaders, readChainDataView, withViewExtensions } from "./runner/envelope.js";
 export { InMemoryBlockSource } from "./runner/in-memory-source.js";

@@ -34,6 +34,7 @@
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
 import { exceedsUtf8, type PrivateLinkChannel } from "../library/channels.js";
 import { type CoreHeaders, withCoreHeaders } from "./api-answers.js";
+import type { RequestHeaders } from "../modules/declaration.js";
 import { type ApiError, apiErrorResponse, type ApiResponse, encodeJson, type ModuleApi } from "./module-api.js";
 
 /** A request body's limit, by default: 1 MiB. */
@@ -97,13 +98,26 @@ export function utf8Text(bytes: Uint8Array): string | null {
   }
 }
 
+/** The request's `Range` and `If-Match`, `get` giving a header by its lowercase name. */
+export function rangeHeaders(get: (name: string) => string | null | undefined): RequestHeaders {
+  const range = get("range");
+  const ifMatch = get("if-match");
+  return { ...(typeof range === "string" ? { range } : {}), ...(typeof ifMatch === "string" ? { ifMatch } : {}) };
+}
+
 /**
  * The module API's answer to a request whose body was read (`text`): `url` its URL, undefined when it cannot be read.
  * The module API reads a POST's body only. Never rejects (`ModuleApi.answer` does not).
  */
-export function answerRequest(api: ModuleApi, method: string, url: URL | undefined, text: string): Promise<ApiResponse> {
+export function answerRequest(
+  api: ModuleApi,
+  method: string,
+  url: URL | undefined,
+  text: string,
+  headers: RequestHeaders = {},
+): Promise<ApiResponse> {
   if (url === undefined) return Promise.resolve(apiErrorResponse(INVALID, "the request URL cannot be read"));
-  return api.answer({ method, path: url.pathname, query: url.searchParams, body: text });
+  return api.answer({ method, path: url.pathname, query: url.searchParams, body: text, headers });
 }
 
 /** The statuses whose answer has no body (a `Response` refuses one). */
@@ -163,7 +177,7 @@ export function moduleApiFetch(api: ModuleApi, options: { readonly maxBodyBytes?
   const max = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   return async (request) => {
     const body = await fetchBody(request, max);
-    const answer = "refused" in body ? body.refused : await answerRequest(api, request.method, new URL(request.url), body.text);
+    const answer = "refused" in body ? body.refused : await answerRequest(api, request.method, new URL(request.url), body.text, rangeHeaders((name) => request.headers.get(name)));
     return responseOf(answer, options.core);
   };
 }

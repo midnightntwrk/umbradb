@@ -606,13 +606,47 @@ counts and queue (after a restart, for one).
     chain-data headers (`X-Umbra-View`, `X-Umbra-Height`, `X-Umbra-Hash`) and headers that keep a browser from running
     them. UmbraDB's own errors (404, 405, a body that is not JSON, 500, 504) carry neither.
 
+- **Binary routes**, for a file's bytes. `defineBinaryRoute({ name, input, http?, maxAnswerBytes?, handle })` is a route whose handler
+  returns a `BinaryFile`, registered with `api.binaryRoute(route)`. It is always a `GET` (`GET /<your-module-id>/<name>`
+  without `http`), and its input, errors and height are a route's.
+
+  ```ts
+  import { binaryData, defineBinaryRoute, RouteError } from "umbradb";
+
+  const getBlob = defineBinaryRoute({
+    name: "getBlob",
+    input: z.object({ id: z.string() }),
+    http: { method: "GET", path: "/v1/blobs/:id" },
+    async handle({ id }, { read }) {
+      const [row] = await read.query("SELECT body, hash FROM my_module.blobs WHERE id = $1", [id]);
+      if (row === undefined) throw new RouteError("not-found", "no-blob", "no blob with that id");
+      return binaryData(row.body as Uint8Array, "application/octet-stream", Buffer.from(row.hash as Uint8Array).toString("hex"));
+    },
+  });
+  ```
+
+  - **`BinaryFile`** is `{ contentType, size, etag?, read(start, end) }`. UmbraDB calls `read` only for the bytes a
+    request asks for (`end` exclusive), during the request, so a large file can be read a part at a time.
+    `binaryData(bytes, contentType, etag?)` wraps bytes you already hold.
+  - **Ranges.** A client asks for part of the file with the `Range` header or the `range` parameter, not both, in the
+    header's form: `0-499`, `500-`, `-500` (the last 500 bytes). One range is answered 206 with `Content-Range`;
+    several are answered whole; one past the end is 416 `range-not-satisfiable`.
+  - **`maxAnswerBytes`** (1 MiB by default) caps one answer. A request for more, whole file or range, is refused 429
+    `answer-too-large`, so clients read a large file in ranges.
+  - **`etag`** is sent as the `ETag`: give one that changes whenever the bytes do (a content hash). A request whose
+    `If-Match` header or `ifMatch` parameter does not name it is refused 412 `precondition-failed`, so a client reading
+    in ranges never mixes two versions. The parameter takes the header's form (`*`, `"9f2c…", "41ab…"`) or one
+    tag bare (`9f2c…`).
+  - Your input may not declare `range` or `ifMatch`: UmbraDB reads them itself, so a transport without headers can
+    send them.
+
   For keyset pages, `pageCursor(schema)` gives `encode(value)` and `decode(text)`: the opaque `nextCursor` of a page
   and its check (400 `invalid-request` for text that is not a value of `schema`). A cursor is a position, not a
   permission: it is not signed, so check what a request may read wherever its cursor points.
 - **Raw HTTP handlers**, for what is HTTP by nature (a GraphQL endpoint, a file). No other transport serves them, and
   the path, the status and the headers are yours. `api.http(method, path, handler)` takes `GET` or `POST` and a path of `/` and segments, each a literal
   (letters, digits and ``-._~!$&'()*+,;=@``) or a parameter `:name`; a literal wins over a parameter. The handler gets
-  `{ params, body }` and a read handle: `params` holds the query's and the path's parameters (the path's win), and a
+  `{ params, body, headers }` and a read handle (`headers` holds the request's `range` and `ifMatch` only): `params` holds the query's and the path's parameters (the path's win), and a
   `POST`'s `body` is its parsed JSON (integers beyond 2^53 as `bigint`). Two registrations of one method and path, by
   you or another module, refuse startup with `duplicate-api-route`, even when the two modules run at different heights.
 - **Answers.** Return `{ status, headers?, body }`, the status from 200 to 599. The body is sent as JSON unless you set

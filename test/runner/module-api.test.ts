@@ -239,7 +239,7 @@ describe("ModuleApi.answer: one request, one bounded read, the module's answer",
       request("GET", "/blocks/12", { query: new URLSearchParams("height=99&limit=5&limit=6") }),
     );
     expect(options).toEqual([{ timeoutMs: 1_234 }]);
-    expect(seen).toEqual([{ params: { height: "12", limit: "5" }, body: undefined }, true]);
+    expect(seen).toEqual([{ params: { height: "12", limit: "5" }, body: undefined, headers: {} }, true]);
     expect(Object.isFrozen((seen[0] as { params: object }).params)).toBe(true);
     expect(response.status).toBe(200);
     // The handler's own headers, its own X-Umbra-Height among them, and the JSON body's type: nothing of the envelope.

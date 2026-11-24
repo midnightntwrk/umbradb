@@ -61,6 +61,7 @@ import {
   DEFAULT_MAX_MESSAGE_BYTES,
   type ModuleApiLimits,
   parseAddress,
+  rangeHeaders,
   type ServedConnection,
   SubscriptionConnection,
   utf8Text,
@@ -247,7 +248,8 @@ async function serve(
     } catch {
       url = undefined;
     }
-    answer = await answerRequest(api, request.method as string, url, body.text);
+    // Node.js gives `Range` as text; it joins repeated `If-Match` lines with commas, as the header's list allows.
+    answer = await answerRequest(api, request.method as string, url, body.text, rangeHeaders((name) => request.headers[name] as string | undefined));
   }
   try {
     // A refused body was not read whole: the connection ends after the answer.

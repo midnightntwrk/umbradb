@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Binary routes (`defineBinaryRoute`, `api.binaryRoute`): API endpoints that serve all or part of a file, with byte
+  ranges, `ETag`/`If-Match` and a per-route answer size limit.
 - Routes for a module's API (`src/modules/route.ts`): `defineRoute({ name, input, output, http?, handle })` declares
   one operation with zod schemas and no transport, and `api.route(route)` registers it from `on-start-api`. The core
   keeps every route with its schemas as JSON Schema and serves it over HTTP under `/<module-id>` (`POST
