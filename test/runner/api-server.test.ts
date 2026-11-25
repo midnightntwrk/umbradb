@@ -807,7 +807,7 @@ describe.each(RUNNER_BACKENDS)("module APIs on listen.api on $name", (backend) =
       ...rest1,
       ...height(2),
     ]);
-    expect(Object.keys(registry as object).sort()).toEqual(["binaryRoute", "http", "route", "subscription"]);
+    expect(Object.keys(registry as object).sort()).toEqual(["binaryRoute", "http", "route"]);
     expect(Object.isFrozen(registry)).toBe(true);
   }, 60_000);
 

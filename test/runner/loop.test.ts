@@ -320,11 +320,11 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
           handleHeight: before,
           rows: prior,
         });
-        // on-db-write: (p, b, w), the block write handle, reporting the cursor before the block.
+        // on-db-write: (p, b, w, topics), the block write handle, reporting the cursor before the block.
         expect(of("on-db-write")).toEqual({
           point: "on-db-write",
           height: h,
-          args: 3,
+          args: 4,
           keys: ["execute", "height", "query"],
           handleHeight: before,
         });
