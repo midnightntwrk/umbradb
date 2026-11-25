@@ -49,7 +49,7 @@ afterAll(async () => {
 
 describe.each(BACKUP_BACKENDS)("the private restore's negative control on $name", (backend) => {
   it("a restore that skips the binding check accepts another public database's backup", async () => {
-    const { bound, file, manifest } = await privateBackup(project, backend, join(dir, `${backend.kind}-control.backup`));
+    const { bound, file, hash } = await privateBackup(project, backend, join(dir, `${backend.kind}-control.backup`));
     const other = await startPublicSide(backend, { head: BACKUP_HEIGHT, start: 2 });
     try {
       const guarded = await backend.database();
@@ -62,7 +62,7 @@ describe.each(BACKUP_BACKENDS)("the private restore's negative control on $name"
       const config = writePrivateConfig(project, { database: db.setting, start: PRIVATE_START, public: other.setting });
       const accepted = await restorePrivate(project, file, config, { restore: { skip: { binding: true } } });
       expect(accepted, accepted.line).toMatchObject({ restored: true });
-      expect(await privateHashOf(db)).toBe(manifest.contentsHash);
+      expect(await privateHashOf(db)).toBe(hash);
       // Bound to the backup's public database (S 1), not to the one it was restored against (S 2).
       const binding = await db.read((read) => readPrivateBinding(read), privateCursorHeight);
       expect(binding?.start).toBe(1n);

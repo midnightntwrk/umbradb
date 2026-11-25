@@ -18,7 +18,6 @@ import {
   BACKUP_BACKENDS,
   type BackupBackend,
   hashOf,
-  TICKER_OPTED_OUT,
   heightsAt,
   manifestOf,
   startTicker,
@@ -33,8 +32,8 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
 /**
  * On PostgreSQL 18.6 and PGlite 0.5.10: a backup written while blocks commit — by the running process
  * (`ProcessHandle.backup`) on both, and by `umbradb backup` from beside it on PostgreSQL — holds every table at its
- * manifest's height, and loaded into a new database its contents hash equals the manifest's and that of an instance
- * stopped at that height; `backupAtStop` writes one backup for the core's stop, and none at a restart at the stop while
+ * manifest's height, and loaded into a new database its contents hash equals that of an instance stopped at that
+ * height; `backupAtStop` writes one backup for the core's stop, and none at a restart at the stop while
  * one of that height is there; without the tool the command fails with `backup-tools-missing`, naming what to install,
  * and writes no file; a private database is refused with `private-backup-refused` without the development opt-in, and
  * backed up with it.
@@ -161,7 +160,6 @@ describe.each(BACKUP_BACKENDS)("backups on $name", (backend) => {
       expect(manifest.migrations.some((row) => row.module === "ticker" && row.migration === "001")).toBe(true);
       const loaded = await backend.load(out);
       expect(await tableHeights(loaded)).toEqual(heightsAt(manifest.height));
-      expect(await hashOf(loaded)).toBe(manifest.contentsHash);
       // The table declared deterministic: false travels with its rows and its sequence's position. A sequence
       // is not transactional: PostgreSQL's pg_dump reads its position as it is when it reads it, not as of the
       // snapshot, so beside commits it can be ahead of the rows — never behind them, so a value is never given twice.
@@ -172,7 +170,7 @@ describe.each(BACKUP_BACKENDS)("backups on $name", (backend) => {
       expect(log).toMatchObject({ n: Number(height), is_called: true });
       if (backend.kind === "pglite") expect(log?.last).toBe(Number(height));
       else expect(log?.last as number).toBeGreaterThanOrEqual(Number(height));
-      expect(await hashStoppedAt(backend, height)).toBe(manifest.contentsHash);
+      expect(await hashOf(loaded)).toBe(await hashStoppedAt(backend, height));
       noPartialFiles();
     },
     TEST_TIMEOUT_MS,
@@ -213,10 +211,10 @@ describe.each(BACKUP_BACKENDS)("backups on $name", (backend) => {
     } finally {
       await third.handle.stop();
     }
-    expect(manifestOf(out)).toMatchObject({ height: "12", contentsHash: manifest.contentsHash });
+    expect(manifestOf(out)).toMatchObject({ height: "12", blockHash: manifest.blockHash });
     const loaded = await backend.load(out);
     expect(await tableHeights(loaded)).toEqual(heightsAt("12"));
-    expect(await hashOf(loaded)).toBe(manifest.contentsHash);
+    expect(await hashOf(loaded)).toBe(await hashOf(db));
 
     // A backup of another height there is replaced once the new one is complete: the stop raised to 14.
     const raised = writeTickerConfig(project, { database: db.setting, stop: 14, extra: { backupAtStop: out } });
@@ -320,14 +318,13 @@ describe("umbradb backup beside a running process", () => {
     expect(result.code).toBe(EXIT.ok);
     const manifest = manifestOf(out);
     expect(result.stdout).toBe(
-      `umbradb backup: wrote ${out}: height ${manifest.height}, contents hash ${manifest.contentsHash}, pg_dump 18.6\n`,
+      `umbradb backup: wrote ${out}: height ${manifest.height}, pg_dump 18.6\n`,
     );
     expect(result.stdout).not.toContain((db.setting as PostgresParts).password);
     expect(after as bigint).toBeGreaterThanOrEqual(BigInt(manifest.height));
     const loaded = await POSTGRES.load(out);
     expect(await tableHeights(loaded)).toEqual(heightsAt(manifest.height));
-    expect(await hashOf(loaded)).toBe(manifest.contentsHash);
-    expect(await hashStoppedAt(POSTGRES, BigInt(manifest.height))).toBe(manifest.contentsHash);
+    expect(await hashOf(loaded)).toBe(await hashStoppedAt(POSTGRES, BigInt(manifest.height)));
   }, TEST_TIMEOUT_MS);
 
   it("on PGlite the command is refused with writer-lock-held while the process holds the directory, and runs after", async () => {
@@ -348,7 +345,7 @@ describe("umbradb backup beside a running process", () => {
     expect(result.code).toBe(EXIT.ok);
     const manifest = manifestOf(out);
     expect(manifest.height).toBe("30");
-    expect(await hashOf(await PGLITE.load(out))).toBe(manifest.contentsHash);
+    expect(await hashOf(await PGLITE.load(out))).toBe(await hashOf(db));
   }, TEST_TIMEOUT_MS);
 });
 
@@ -428,7 +425,6 @@ describe("pg_dump's command line and failures", () => {
         db: opened,
         target: { backend: "postgres", connection: plain },
         out: output("no-password"),
-        optedOut: TICKER_OPTED_OUT,
         developmentOptIn: true,
         env: {
           PATH: String(process.env.PATH),
@@ -503,7 +499,7 @@ describe("a private database is not backed up by UmbraDB without the development
         try {
           const target = { backend: "postgres" as const, connection: privateConnection };
           for (const side of ["private", "public"] as const) {
-            const error = await writeBackup({ db, target, out, optedOut: [], side, developmentOptIn: false, env }).then(
+            const error = await writeBackup({ db, target, out, side, developmentOptIn: false, env }).then(
               () => null,
               (caught: unknown) => caught,
             );
@@ -518,7 +514,7 @@ describe("a private database is not backed up by UmbraDB without the development
         const publicOpened = openPostgres({ connection: publicConnection, committedHeight: commandCommittedHeight });
         try {
           await expect(
-            writeBackup({ db: publicOpened, target: publicTarget, out, optedOut: [], side: "private", developmentOptIn: false, env }),
+            writeBackup({ db: publicOpened, target: publicTarget, out, side: "private", developmentOptIn: false, env }),
           ).rejects.toMatchObject({ code: "private-backup-refused" });
         } finally {
           await publicOpened.close();
@@ -533,7 +529,7 @@ describe("a private database is not backed up by UmbraDB without the development
         const own = output("private-own");
         const { manifest } = await privateProcess.handle.backup(own);
         expect(manifest.height).toBe("5");
-        expect(manifest.contentsHash).toBe(manifestOf(out).contentsHash);
+        expect(manifest).toMatchObject({ blockHash: manifestOf(out).blockHash, history: manifestOf(out).history });
       } finally {
         await privateProcess?.stop();
         await core.stop();

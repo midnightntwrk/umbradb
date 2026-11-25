@@ -118,7 +118,6 @@ describe("a restore's history file", () => {
       stateRoot: null,
       history: [],
       migrations: [],
-      contentsHash: hash,
       umbradb: "0.10.0",
       postgres: "18.6",
       tool: { name: "pg_dump", version: "18.6" },

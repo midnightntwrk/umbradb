@@ -97,12 +97,6 @@ async function until(ready: () => boolean, what: string, run?: Pausable): Promis
 /** Waits until `run` logged `line`. */
 const logged = (run: Pausable, line: string) => until(() => run.lines().includes(line), `logged: ${line}`);
 
-/** Waits until `run` logged a line starting with `prefix`; resolves with it. */
-async function loggedStarting(run: Pausable, prefix: string): Promise<string> {
-  await until(() => run.lines().some((line) => line.startsWith(prefix)), `logged: ${prefix}…`);
-  return run.lines().find((line) => line.startsWith(prefix)) as string;
-}
-
 /** The heights from `from` to `to` as text. */
 const heights = (from: number, to: number): string[] => Array.from({ length: to - from + 1 }, (_, i) => String(from + i));
 
@@ -209,19 +203,18 @@ describe("SIGUSR2 writes a backup at the next pause (backupOnSignal)", () => {
       expect(signals.listenerCount("SIGUSR2")).toBe(0);
       expect(run.lines()).toContain(`SIGUSR2 writes a backup to ${out} at the loop's next pause (backupOnSignal)`);
       expect(run.lines()).toContain(`SIGUSR2: a backup on signal to ${out} is already being written; this signal adds none`);
-      const { height, contentsHash } = backupAtPause(run, out);
+      const { height } = backupAtPause(run, out);
       expect(height).toBe(20n);
       eachHeightOnce(run.points(), 1n, head);
       const manifest = manifestOf(out);
-      expect(manifest).toMatchObject({ height: "20", contentsHash, tool: { name: "pglite-tools" } });
+      expect(manifest).toMatchObject({ height: "20", tool: { name: "pglite-tools" } });
       // Restored like any other backup: every restore check passes, and it holds height 20.
       const target = await PGLITE.database();
       const restored = await restoreRun(project, out, writePausableConfig(project, { database: target.setting }), chain(head));
       expect(restored.stderr).toBe("");
       expect(restored.code).toBe(EXIT.ok);
       expect(await tableHeights(target)).toEqual(heightsAt("20"));
-      expect(await hashOf(target)).toBe(manifest.contentsHash);
-      expect(await hashUnpausedAt(project, PGLITE, 20n)).toBe(manifest.contentsHash);
+      expect(await hashOf(target)).toBe(await hashUnpausedAt(project, PGLITE, 20n));
     },
     TEST_TIMEOUT_MS,
   );
@@ -241,7 +234,7 @@ describe("SIGUSR2 writes a backup at the next pause (backupOnSignal)", () => {
         expect(await run.handle.ended).toMatchObject({ kind: "stopped", height: 12n, core: true });
         signals.emit("SIGUSR2");
         await logged(run, "backup on signal: processing ended at height 12");
-        await loggedStarting(run, `backup on signal written to ${out}: height 12, contents hash `);
+        await logged(run, `backup on signal written to ${out}: height 12`);
         expect(manifestOf(out).height).toBe("12");
         signals.emit("SIGUSR2");
         await logged(run, `backup on signal: ${out} holds a backup of height 12 already, so none was written`);

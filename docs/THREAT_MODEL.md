@@ -318,7 +318,7 @@ filter them inside the private process.
 
 The owner's resolution on 2026-10-28 leaves restore unchanged: restore only backups you wrote.
 Restore runs the file's SQL with the database login's, or writer's, rights. The load loop executes statements
-before restoring ownership and checking the loaded contents hash and ledger root
+before restoring ownership and checking the loaded ledger root
 (`src/backup/restore.ts:406`, `src/backup/restore.ts:411`, `src/backup/restore.ts:415`,
 `src/backup/restore.ts:430`).
 
@@ -341,8 +341,8 @@ The owner assigns backup origin and confidentiality to the operator.
 UmbraDB neither signs nor encrypts backups: it writes a manifest and plain dump output
 (`src/backup/manifest.ts:53`, `src/backup/manifest.ts:72`, `src/backup/backup.ts:175`,
 `src/backup/backup.ts:251`).
-Manifest hashes compare loaded contents with claims carried in the same file; they establish self-consistency,
-not who wrote the file or whether its SQL is safe (`src/backup/restore.ts:416`).
+The manifest's hashes identify the chain and block the backup claims; nothing checks the loaded rows against the
+file's own claims, and nothing establishes who wrote the file or whether its SQL is safe.
 
 Storing, moving and encrypting backups, and knowing their origin, are the operator's responsibilities.
 A private instance's backup requires development opt-in and contains its private data in clear

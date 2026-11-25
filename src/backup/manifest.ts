@@ -12,13 +12,14 @@
  *   (`core_ledger_state.states`), else null;
  * - `history`: every `core_chain.config` row;
  * - `migrations`: every `core_chain.migrations` row;
- * - `contentsHash`: computed in the same snapshot as the dump;
  * - `umbradb`, `postgres` and `tool`: the versions of UmbraDB, of the PostgreSQL server and of the tool that wrote the
  *   dump.
  *
  * Heights are decimal text and hashes `0x`-prefixed lowercase hex. A history row's `data` is its data fields as JSON;
  * an integer outside ±(2^53 − 1) is written exactly, and read back with the `deterministic_postgresql` component's
  * lossless reader.
+ *
+ * A manifest of an earlier build may also hold `contentsHash`; it is ignored.
  */
 
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
@@ -67,7 +68,6 @@ export interface Manifest {
   readonly stateRoot: string | null;
   readonly history: readonly ManifestHistoryRow[];
   readonly migrations: readonly ManifestMigration[];
-  readonly contentsHash: string;
   readonly umbradb: string;
   readonly postgres: string;
   readonly tool: ManifestTool;
@@ -130,7 +130,6 @@ export function readManifestLine(line: string): Manifest {
   text("height", HEIGHT);
   text("blockHash", HASH);
   text("stateRoot", HEX, true);
-  text("contentsHash", HASH);
   for (const field of ["umbradb", "postgres"]) check(typeof value[field] === "string", field);
   const tool = value.tool;
   check(

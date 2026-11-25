@@ -196,7 +196,7 @@ restore_progress() {
       last=$pos
       msg="$pass the file: $((pos * 100 / size))%"
     elif [[ $pass == loading ]]; then
-      msg="loaded: checking the contents hash and the ledger root"
+      msg="loaded: checking the ledger root"
     else
       msg="starting"
     fi

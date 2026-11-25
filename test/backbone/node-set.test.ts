@@ -26,7 +26,7 @@ import { contentDefinedLedgerState, countsAndQueue, type StoredRow } from "./con
  *   `ledger-refcount-invalid` (`details.check` `node-key`), as does a child list with a length in more bytes than it
  *   needs (the ledger refuses it), and counts or a queue its rows do not give fail it with
  *   reason `tables-inconsistent` (`closure`, `roots`, `counts`, `queue`) — here through the exported `contentsHash`
- *   itself; the backup and the restore are `../backup/restore-content-defined.test.ts`. Its three negative controls,
+ *   itself. Its three negative controls,
  *   each a test build (`./content-defined-build.ts`) declaring the tables otherwise: `nodes` hashed by its raw rows, a
  *   constant in place of the node set, the key check skipped. The clause of `src/ledger/node-key.ts` on the tapes is
  *   `../ledger/node-key-tape-*.test.ts`.

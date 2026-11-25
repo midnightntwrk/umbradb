@@ -10,8 +10,8 @@
  *
  * **The snapshot, by backend:**
  * - **PostgreSQL:** one read of the database API, a `REPEATABLE READ READ ONLY` transaction on a read connection. It
- *   reads the manifest's facts (`./facts.ts`: the cursor, the identity, the history, the migrations, the state root,
- *   the contents hash), refuses a private database without the opt-in, and exports its snapshot
+ *   reads the manifest's facts (`./facts.ts`: the cursor, the identity, the history, the migrations, the state root),
+ *   refuses a private database without the opt-in, and exports its snapshot
  *   (`pg_export_snapshot()`). While the transaction stays open, it runs `pg_dump --snapshot=<id> --inserts --no-owner
  *   --no-privileges`, whose output follows the manifest line in the file. The database URL's password reaches
  *   `pg_dump` in its environment (`PGPASSWORD`), never on its command line.
@@ -63,7 +63,7 @@ export type BackupTarget =
   | { readonly backend: "postgres"; readonly connection: PostgresConnection }
   | { readonly backend: "pglite" };
 
-/** What {@link writeBackup} backs up, and where (the database, its opt-outs, side and opt-in: `DumpInput`). */
+/** What {@link writeBackup} backs up, and where (the database, its side and opt-in: `DumpInput`). */
 export interface BackupInput extends DumpInput {
   readonly target: BackupTarget;
   /** The file to write: replaced only once the new backup is complete. */

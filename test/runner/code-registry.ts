@@ -50,7 +50,7 @@ export const REFUSALS_AND_HALTS: RefusalsAndHalts = Object.freeze({
   backup: Object.freeze([
     "backup-tools-missing", "private-backup-refused", "backup-format-unknown", "restore-target-not-empty",
     "backup-history-mismatch", "backup-build-mismatch", "backup-genesis-mismatch", "backup-block-not-finalized",
-    "contents-hash-mismatch", "backup-root-mismatch", "private-binding-mismatch",
+    "backup-root-mismatch", "private-binding-mismatch",
   ]),
   halt: Object.freeze([
     "callback-error", "database-error", "parent-mismatch", "finality-conflict", "node-requirement",
@@ -415,7 +415,6 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
       "backup-build-mismatch",
       "backup-genesis-mismatch",
       "backup-block-not-finalized",
-      "contents-hash-mismatch",
     ].map((code) => [
       `backup:${code}`,
       [

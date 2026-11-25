@@ -758,7 +758,7 @@ export interface ProcessListening {
 export interface OpenedProcess {
   readonly db: Database;
   readonly optedOut: readonly TableName[];
-  /** The schema plan's content-defined tables, which a backup's contents hash takes by their content. */
+  /** The schema plan's content-defined tables, which the contents hash takes by their content. */
   readonly contentDefined: readonly ContentDefinedTables[];
 }
 
@@ -1232,9 +1232,9 @@ class Process implements ProcessHandle {
   #loop: FinalizedLoop | undefined;
   /** A public process's bookkeeping of its `lockstepInstances`, once startup read them. */
   #lockstep: Lockstep | undefined;
-  /** The schema plan's tables declared `deterministic: false`, for a backup's contents hash. */
+  /** The schema plan's tables declared `deterministic: false`, for the contents hash ({@link opened}). */
   #optedOut: readonly TableName[] = [];
-  /** The schema plan's content-defined tables, for a backup's contents hash. */
+  /** The schema plan's content-defined tables, for the contents hash ({@link opened}). */
   #contentDefined: readonly ContentDefinedTables[] = [];
   /**
    * The holds that pause the loop between heights: {@link pause}'s and SIGUSR2's. A change of the pause that `/status`
@@ -1534,7 +1534,7 @@ class Process implements ProcessHandle {
         height === null ? { written: true, ...(await writeBackup(input)) } : await backupAtStop(input, height);
       this.#log(
         written
-          ? `backup on signal written to ${out}: height ${manifest.height}, contents hash ${manifest.contentsHash}`
+          ? `backup on signal written to ${out}: height ${manifest.height}`
           : `backup on signal: ${out} holds a backup of height ${height} already, so none was written`,
       );
     } catch (error) {
@@ -1546,8 +1546,7 @@ class Process implements ProcessHandle {
   }
 
   /**
-   * What a backup of the process's database is given: its backend, its opted-out and content-defined tables, its side
-   * and its opt-in.
+   * What a backup of the process's database is given: its backend, its side and its opt-in.
    */
   #backupInput(out: string): BackupInput {
     const settings = (this.#core as CheckedEntry).settings as PlainObject;
@@ -1556,8 +1555,6 @@ class Process implements ProcessHandle {
       db: this.#db as Database,
       target: target.backend === "postgres" ? { backend: "postgres", connection: target.connection } : { backend: "pglite" },
       out,
-      optedOut: this.#optedOut,
-      contentDefined: this.#contentDefined,
       side: this.#side,
       developmentOptIn: settings.developmentOptIn === true,
     };
@@ -1576,10 +1573,10 @@ class Process implements ProcessHandle {
       return;
     }
     try {
-      const { written, manifest } = await backupAtStop(this.#backupInput(resolve(this.#input.cwd, out)), height);
+      const { written } = await backupAtStop(this.#backupInput(resolve(this.#input.cwd, out)), height);
       this.#log(
         written
-          ? `backup at stop written to ${out}: height ${height}, contents hash ${manifest.contentsHash}`
+          ? `backup at stop written to ${out}: height ${height}`
           : `backup at stop: ${out} holds a backup of height ${height} already, so none was written`,
       );
     } catch (error) {

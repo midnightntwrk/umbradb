@@ -45,7 +45,6 @@ const MANIFEST: Manifest = {
     },
   ],
   migrations: [{ module: "ticker", migration: "001", checksum: "cd".repeat(32), position: 1 }],
-  contentsHash: HASH,
   umbradb: "0.9.5",
   postgres: "18.6",
   tool: { name: "pg_dump", version: "18.6" },
@@ -76,6 +75,11 @@ describe("the manifest's line", () => {
     expect((read.history[0]?.data as Record<string, unknown>).big).toBe(9_007_199_254_740_993n);
   });
 
+  it("reads an earlier build's manifest, its contentsHash ignored", () => {
+    const earlier = readManifestLine(`${MANIFEST_PREFIX}${JSON.stringify({ ...MANIFEST, history: [], contentsHash: HASH })}`);
+    expect(earlier).toMatchObject({ ...MANIFEST, history: [] });
+  });
+
   it.each([
     ["no manifest line", "SET statement_timeout = 0;", "first line is not"],
     ["no JSON", `${MANIFEST_PREFIX}{`, "not JSON"],
@@ -97,7 +101,6 @@ describe("the manifest's line", () => {
       blockHash: null,
       stateRoot: "ab",
       migrations: [{ module: "m", migration: "1", checksum: "zz", position: 0 }],
-      contentsHash: 1,
       umbradb: null,
       postgres: 18,
       tool: { name: "psql", version: "18" },
@@ -115,7 +118,6 @@ describe("the manifest's line", () => {
       "height",
       "blockHash",
       "stateRoot",
-      "contentsHash",
       "umbradb",
       "postgres",
       "tool",
@@ -239,7 +241,7 @@ describe("a backup with nothing to back up, and the backup at stop's file", () =
     const out = join(dir, "nothing.backup");
     try {
       await expect(
-        writeBackup({ db, target: { backend: "pglite" }, out, optedOut: [], developmentOptIn: true }),
+        writeBackup({ db, target: { backend: "pglite" }, out, developmentOptIn: true }),
       ).rejects.toMatchObject({ code: "no-committed-height" });
     } finally {
       await db.close();
@@ -252,7 +254,7 @@ describe("a backup with nothing to back up, and the backup at stop's file", () =
     const connection = { host: "127.0.0.1", port: 1, user: "u", password: "p", name: "x", ssl: "disable" } as const;
     const postgres = openPostgres({ connection, committedHeight: async () => null });
     try {
-      const input = { db: postgres, target: { backend: "pglite" as const }, out: join(dir, "x.backup"), optedOut: [], developmentOptIn: true };
+      const input = { db: postgres, target: { backend: "pglite" as const }, out: join(dir, "x.backup"), developmentOptIn: true };
       await expect(writeBackup(input)).rejects.toThrow("is not one the PGlite backend opened");
       const folder = mkdtempSync(join(dir, "a-folder-"));
       await expect(backupAtStop({ ...input, out: folder }, 1n)).rejects.toMatchObject({ code: "EISDIR" });
@@ -266,7 +268,7 @@ describe("a backup with nothing to back up, and the backup at stop's file", () =
     writeFileSync(out, "operator's own file\n");
     const db = await openPglite({ dataDir: "memory://", committedHeight: async () => null, developmentOptIn: true });
     try {
-      const input = { db, target: { backend: "pglite" as const }, out, optedOut: [], developmentOptIn: true };
+      const input = { db, target: { backend: "pglite" as const }, out, developmentOptIn: true };
       await expect(backupAtStop(input, 12n)).rejects.toMatchObject({ code: "backup-format-unknown", details: { file: out } });
     } finally {
       await db.close();
@@ -298,7 +300,7 @@ describe("the manifest's facts of a database", () => {
           await tx.execute(sql);
         }
       });
-      const facts = await db.read((read) => readBackupFacts(read, { optedOut: [] }));
+      const facts = await db.read((read) => readBackupFacts(read));
       expect(facts.private).toBe(false);
       expect(facts.manifest).toMatchObject({
         genesisHash: `0x${"00".repeat(32)}`,
@@ -314,9 +316,9 @@ describe("the manifest's facts of a database", () => {
         { id: "m", start: "10", stop: null, version: "1.1.0", data: { a: 1 }, dataHash: `0x${"01".repeat(32)}`, provides: ["x"] },
       ]);
       await db.transaction((tx) => tx.execute("DELETE FROM core_ledger_state.states"));
-      expect((await db.read((read) => readBackupFacts(read, { optedOut: [] }))).manifest.stateRoot).toBeNull();
+      expect((await db.read((read) => readBackupFacts(read))).manifest.stateRoot).toBeNull();
       await db.transaction((tx) => tx.execute("DROP TABLE core_chain.config"));
-      expect((await db.read((read) => readBackupFacts(read, { optedOut: [] }))).manifest.history).toEqual([]);
+      expect((await db.read((read) => readBackupFacts(read))).manifest.history).toEqual([]);
     } finally {
       await db.close();
     }
@@ -339,7 +341,7 @@ describe("pglite-tools' pg_dump of another major version", () => {
         await tx.execute("CREATE TABLE core_chain.identity (id smallint PRIMARY KEY, genesis_hash bytea NOT NULL, start_height bigint NOT NULL, anchor_hash bytea)");
         await tx.execute(`INSERT INTO core_chain.identity VALUES (1, '\\x${"00".repeat(32)}', 1, NULL)`);
       });
-      const input = { db, target: { backend: "pglite" as const }, out, optedOut: [], developmentOptIn: true };
+      const input = { db, target: { backend: "pglite" as const }, out, developmentOptIn: true };
       await expect(writeBackup(input, { pgliteTools: fake })).rejects.toMatchObject({
         code: "backup-tools-missing",
         message:
@@ -357,7 +359,7 @@ describe("pglite-tools' pg_dump of another major version", () => {
       // pgliteBackupText itself refuses a private database without the opt-in, before it reads anything (the browser's
       // worker calls it without writeBackup).
       await expect(
-        pgliteBackupText({ db, optedOut: [], side: "private", developmentOptIn: false }, async () => {
+        pgliteBackupText({ db, side: "private", developmentOptIn: false }, async () => {
           throw new Error("no dump expected");
         }),
       ).rejects.toMatchObject({ code: "private-backup-refused" });

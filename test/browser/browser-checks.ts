@@ -176,7 +176,7 @@ export function restoreProblems(attempts: readonly RestoreAttempt[]): string[] {
 
 /**
  * The continuation check: the file restored in a fresh profile is the backup the first profile saved
- * at `backup.height` (its contents hash the first profile's then); the page kept the backup's S and started the core
+ * at `backup.height` (the height the first profile's contents hash was read at then); the page kept the backup's S and started the core
  * with it; the core went on from the backup's height + 1 to `status`'s height, every block once from S; and its
  * contents hash there equals an uninterrupted run's (`uninterrupted`, Node.js on the same tape and configuration).
  */
@@ -195,13 +195,9 @@ export function continuedProblems(
 ): string[] {
   const problems: string[] = [];
   const { saved, hashThen } = backup;
-  if (hashThen.height !== saved.height || hashThen.hash !== saved.contentsHash) {
-    problems.push(`the backup at ${saved.height} has the contents hash ${saved.contentsHash}, the page's at ${hashThen.height} ${hashThen.hash}`);
-  }
+  if (hashThen.height !== saved.height) problems.push(`the backup is of ${saved.height}, the page's contents hash read at ${hashThen.height}`);
   if (!restored.restored) problems.push(`the backup was not restored: ${restored.code ?? ""} ${restored.message ?? ""}`);
-  if (restored.height !== saved.height || restored.contentsHash !== saved.contentsHash) {
-    problems.push(`the restored backup is of ${restored.height} (${restored.contentsHash}), not the saved ${saved.height} (${saved.contentsHash})`);
-  }
+  if (restored.height !== saved.height) problems.push(`the restored backup is of ${restored.height}, not the saved ${saved.height}`);
   if (String(restored.start) !== saved.start) problems.push(`the restore's S is ${restored.start}, the backup's ${saved.start}`);
   if (page.keptStart !== saved.start) problems.push(`the page keeps S ${String(page.keptStart)} for its database, not the backup's ${saved.start}`);
   if (String(page.chosen) !== saved.start) problems.push(`the core started with S ${page.chosen}, not the backup's ${saved.start}`);

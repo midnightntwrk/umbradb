@@ -51,7 +51,7 @@ import { nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js
 import { nodeOptionsOf } from "../../src/backbone/core-chain/core-chain.js";
 import { manifestLine, readManifestLine } from "../../src/backup/manifest.js";
 import { type PgliteDump, pgliteBackupText } from "../../src/backup/pglite-backup.js";
-import { type RestoreSeams, restoreBackup } from "../../src/backup/restore.js";
+import { restoreBackup } from "../../src/backup/restore.js";
 import { blobText } from "../../src/backup/text.js";
 import type { PlainObject } from "../../src/config/plain-data.js";
 import type { CommittedHeight } from "../../src/db/api.js";
@@ -95,10 +95,6 @@ let restoring = false;
 /** The committed height of a core's database: its cursor's; a restore's target is a core's (see above). */
 const coreCommittedHeight: CommittedHeight = async (read) => (await readCursor(read))?.height ?? null;
 
-/** The negative control of the page's restore (`browser/build.ts`): the contents hash's check skipped. */
-const RESTORE_SEAMS: RestoreSeams =
-  __UMBRADB_BROWSER_CONTROL__ === "restore-skips-contents-hash" ? { skip: { contentsHash: true } } : {};
-
 /** The process's database, its opted-out and content-defined tables while its module API is open, or null. */
 const openedProcess = (): OpenedProcess | null => handle?.opened() ?? null;
 
@@ -108,16 +104,8 @@ async function backUp(): Promise<unknown> {
   if (opened === null) throw new Error("the process has not completed its startup, or has stopped: nothing to back up");
   // The database the process opened and handed its module API: a PGlite database (exclusiveJob checks it).
   const { db } = opened;
-  const { manifest, text } = await pgliteBackupText(
-    { db, optedOut: opened.optedOut, contentDefined: opened.contentDefined, side, developmentOptIn: true },
-    pgDump as unknown as PgliteDump,
-  );
-  return {
-    height: manifest.height,
-    start: manifest.start,
-    contentsHash: manifest.contentsHash,
-    text: manifestLine(manifest) + text,
-  };
+  const { manifest, text } = await pgliteBackupText({ db, side, developmentOptIn: true }, pgDump as unknown as PgliteDump);
+  return { height: manifest.height, start: manifest.start, text: manifestLine(manifest) + text };
 }
 
 /** Restores the backup `file` into the core's database before its process starts (see the module comment). */
@@ -165,14 +153,13 @@ async function restoreInto(file: Blob, run: StartRun): Promise<unknown> {
           core,
           source,
         },
-        RESTORE_SEAMS,
       );
       const { manifest } = restored;
       post({
         type: "log",
         line: `restored a backup of height ${manifest.height} (S ${manifest.start}, ${restored.statements} statements)`,
       });
-      return { start, height: manifest.height, contentsHash: manifest.contentsHash, statements: restored.statements };
+      return { start, height: manifest.height, statements: restored.statements };
     } finally {
       await source.close();
       await client.close();

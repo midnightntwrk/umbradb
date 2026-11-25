@@ -17,7 +17,8 @@ deterministically. Run what you need, extend what is missing.
   the last whole block, and a restart resumes there.
 - **Deterministic.** The same chain gives the same database. Each table has a digest, updated every block, and two
   instances compare one contents hash.
-- **Backup and restore.** A backup is a `pg_dump` file, checked against its contents hash when it is restored.
+- **Backup and restore.** A backup is a `pg_dump` file, checked against the chain and the configuration when it is
+  restored.
 - **Private data apart.** Private modules run in private processes with their own databases; the public database stays
   shareable.
 - **Server and browser.** The same code runs on Node.js with PostgreSQL 18 and in a browser page on PGlite.
@@ -261,7 +262,7 @@ module test with it, on an in-memory chain; §18 lists its options, its handle, 
 **What a backup holds.** A `pg_dump` file in plain SQL (`--inserts --no-owner --no-privileges`): every table of the
 database at one committed height, so whole blocks only. Its first line is UmbraDB's manifest: the chain's genesis hash,
 S, the height and its block hash, the ledger state root (with `core-ledger-state`), the configuration history, the
-applied migrations with their checksums, the contents hash, and the PostgreSQL, UmbraDB and tool versions. Use a backup
+applied migrations with their checksums, and the PostgreSQL, UmbraDB and tool versions. Use a backup
 to move an indexer, or to start a new one mid-chain without syncing from genesis. To check that two databases agree,
 compare their digests and contents hashes (`/status`), not their files. Every backup file is created owner-only
 (`0600`); UmbraDB neither encrypts nor signs it, so storing, moving and encrypting backups is the operator's.
@@ -273,7 +274,7 @@ npx umbradb backup --out preview-10000.backup [--config umbradb.config.ts]
 ```
 
 ```text
-umbradb backup: wrote …/preview-10000.backup: height 10000, contents hash 0x5f7b75c9…, pglite-tools 18.6
+umbradb backup: wrote …/preview-10000.backup: height 10000, pglite-tools 18.6
 ```
 
 - **PostgreSQL:** runs PostgreSQL 18's `pg_dump` (on `PATH`, or `UMBRADB_PG_DUMP=/path/to/pg_dump`) beside the running
@@ -294,8 +295,7 @@ npx umbradb restore preview-10000.backup [--config umbradb.config.ts]
 ```
 
 ```text
-umbradb restore: restored …/preview-10000.backup: height 10000, contents hash 0x5f7b75c9…; the database resumes
-from 10001
+umbradb restore: restored …/preview-10000.backup: height 10000; the database resumes from 10001
 ```
 
 **Restore only backups you wrote, or trust.** A restore runs the file's SQL with the writer's rights — the database
@@ -317,10 +317,9 @@ refuses, leaving the target as it was, with:
 | `backup-build-mismatch` | The build lacks an entry's version or a migration the backup applied |
 | `backup-genesis-mismatch` | The node serves another chain |
 | `backup-block-not-finalized` | The node has not finalized the backup's block, or finalized another at its height |
-| `contents-hash-mismatch` | The restored data is not what the manifest says |
 | `backup-root-mismatch` | With `core-ledger-state`, the restored ledger state root is not the node's |
 
-The first six are checked before loading; the last two after, inside the restore's one transaction, which then rolls
+The first six are checked before loading; the last one after, inside the restore's one transaction, which then rolls
 back. An interrupted restore leaves the target empty. Then `umbradb run` with the same configuration resumes from the
 backup's height + 1. A private process's backup is restored the same way with the private configuration, checked
 against its public database instead of a node ([operator guide](docs/operator-guide.md#restoring-a-backup)).

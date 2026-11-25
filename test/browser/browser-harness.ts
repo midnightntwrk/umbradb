@@ -267,7 +267,6 @@ export interface PageBackup {
   readonly file: string;
   readonly height: string;
   readonly start: string;
-  readonly contentsHash: string;
   readonly bytes: number;
 }
 
@@ -280,7 +279,6 @@ export interface PageRestore {
   readonly details?: unknown;
   readonly start?: number;
   readonly height?: string;
-  readonly contentsHash?: string;
   readonly statements?: number;
 }
 
@@ -338,12 +336,3 @@ export async function restoreThrough(tab: ChromeTab, path: string, patience: num
   return tab.evaluate<PageRestore>(`window.umbradb.restores[${before}]`);
 }
 
-/**
- * A backup's text with one value changed in a row the contents hash covers: `probe.rows`' row of height 5 moved to 50,
- * which the restore must refuse with `contents-hash-mismatch`.
- */
-export function tamperedBackup(text: string): string {
-  const row = /^INSERT INTO probe\.rows VALUES \(5, /m;
-  if (!row.test(text)) throw new Error("the backup has no probe.rows row of height 5 to change");
-  return text.replace(row, "INSERT INTO probe.rows VALUES (50, ");
-}

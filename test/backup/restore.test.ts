@@ -146,8 +146,8 @@ describe("a backup written on one backend restores on the other", () => {
         [POSTGRES, PGLITE],
         [PGLITE, POSTGRES],
       ] as const) {
-        const { file } = await backupAt(from, H);
-        const manifest = manifestOf(file);
+        const { file, source } = await backupAt(from, H);
+        const expected = await hashOf(source);
         const { db, config } = await target(to);
         const result = await restoreRun(file, config);
         expect(result.stderr, `${from.kind} → ${to.kind}`).toBe("");
@@ -155,15 +155,14 @@ describe("a backup written on one backend restores on the other", () => {
         // A PGlite target not created yet is created, which the command says, naming it.
         const created = to.kind === "pglite" ? `umbradb restore: created a new PGlite data directory ${pathOf(db.setting)}\n` : "";
         expect(result.stdout).toBe(
-          `${created}umbradb restore: restored ${file}: height ${H}, contents hash ${manifest.contentsHash}; the database ` +
-            `resumes from ${H + 1n}\n`,
+          `${created}umbradb restore: restored ${file}: height ${H}; the database resumes from ${H + 1n}\n`,
         );
         expect(await tableHeights(db)).toEqual(heightsAt(String(H)));
-        expect(await hashOf(db)).toBe(manifest.contentsHash);
+        expect(await hashOf(db)).toBe(expected);
         // A database of the target's backend built by migrations, at the same height.
         const reference = await to.database();
         await continueTo(reference, H);
-        expect(await hashOf(reference)).toBe(manifest.contentsHash);
+        expect(await hashOf(reference)).toBe(expected);
         const catalog = await catalogOf(db);
         expect(catalog).toEqual(await catalogOf(reference));
         // The module's routine and enum are among what is compared, its role's as on the migrated database.
@@ -210,8 +209,8 @@ describe.each(BACKUP_BACKENDS)("a configuration with a module from above the bac
     "restores a backup at h with a configuration that adds a module from h + 1, whose schema the backup does not hold, " +
       "and the restored database continues with that configuration, the module's routine not executable by PUBLIC",
     async () => {
-      const { file } = await backupAt(backend, H);
-      const manifest = manifestOf(file);
+      const { file, source } = await backupAt(backend, H);
+      const expected = await hashOf(source);
       const db = await backend.database();
       project.write("late.ts", LATE_MODULE.replace("@BUILDERS@", project.builders));
       const settings = JSON.stringify(coreSettings(db.setting, { listen: { admin: "127.0.0.1:0" } }));
@@ -233,7 +232,7 @@ describe.each(BACKUP_BACKENDS)("a configuration with a module from above the bac
       const result = await restoreRun(file, config);
       expect(result.stderr).toBe("");
       expect(result.code).toBe(EXIT.ok);
-      expect(await hashOf(db)).toBe(manifest.contentsHash);
+      expect(await hashOf(db)).toBe(expected);
       // The module's schema is made for it, empty, owned by its role, as startup makes it.
       expect(await db.query("SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname = 'late'")).toEqual([
         { owner: "umbradb_m_late" },
@@ -265,7 +264,6 @@ describe.each(BACKUP_BACKENDS)("each restore refusal on $name, in its order", (b
       "every refusal the target is as it was",
     async () => {
       const { file, source } = await backupAt(backend, H);
-      const manifest = manifestOf(file);
       const text = readFileSync(file, "utf8");
       const variant = (name: string, body: string): string => {
         const path = output(name);
@@ -336,25 +334,13 @@ describe.each(BACKUP_BACKENDS)("each restore refusal on $name, in its order", (b
       await refused(file, config, "backup-block-not-finalized", chain(HEAD, [otherAtH]));
       await empty();
 
-      // After loading: contents-hash-mismatch for a changed value in a row the contents hash covers — and before it, a
-      // check before loading wins (the genesis here).
-      const total = (H * (H + 1n)) / 2n;
-      const tallied = `INSERT INTO ticker.tally VALUES (1, ${H}, ${total});`;
-      expect(text).toContain(tallied);
-      const tampered = variant("tampered", text.replace(tallied, `INSERT INTO ticker.tally VALUES (1, ${H}, ${total + 1n});`));
-      const mismatch = await refused(tampered, config, "contents-hash-mismatch");
-      expect(mismatch).toContain(manifest.contentsHash);
-      await empty();
-      await refused(tampered, config, "backup-genesis-mismatch", chain(HEAD, [otherGenesis]));
-      await empty();
-
-      // A changed value in a table declared deterministic: false is no row the contents hash covers: restored.
+      // A changed value in a table declared deterministic: false is restored, the contents hash the source's.
       const logged = text.match(/^INSERT INTO ticker\.log VALUES \(3, 3, '[^']*'\);$/m)?.[0] as string;
       expect(logged).toBeDefined();
       const loggedOther = logged.replace(/'[^']*'/, "'2000-01-01 00:00:00+00'");
       const restored = await restoreRun(variant("opted-out", text.replace(logged, loggedOther)), config);
       expect(restored.code).toBe(EXIT.ok);
-      expect(await hashOf(db)).toBe(manifest.contentsHash);
+      expect(await hashOf(db)).toBe(before.hash);
       // And the target is no longer empty: the next restore into it is refused, nothing changed.
       await refused(file, config, "restore-target-not-empty");
     },
@@ -389,7 +375,7 @@ describe("umbradb restore against the configuration's node", () => {
         const result = await restoreRun(file, config, {});
         expect(result.stderr).toBe("");
         expect(result.code).toBe(EXIT.ok);
-        expect(await hashOf(db)).toBe(manifestOf(file).contentsHash);
+        expect(await hashOf(db)).toBe(await hashOf(source));
       } finally {
         await restoreNode.close();
       }
@@ -464,8 +450,9 @@ describe("the restore's own transaction", () => {
     expect(schemas).toEqual([{ nspname: "intruder" }]);
   }, TEST_TIMEOUT_MS);
 
-  it("resets what the file's SQL set before it hashes: a dump that changes how dates print still restores", async () => {
-    const { file } = await backupAt(PGLITE, H);
+  it("resets what the file's SQL set: a dump that changes how dates print still restores the source's contents", async () => {
+    const { file, source } = await backupAt(PGLITE, H);
+    const expected = await hashOf(source);
     const text = readFileSync(file, "utf8");
     const changed = output("datestyle");
     writeFileSync(changed, text.replace("SET row_security = off;", "SET row_security = off;\nSET DateStyle = 'SQL, DMY';"));
@@ -475,7 +462,7 @@ describe("the restore's own transaction", () => {
       const result = await restoreRun(changed, config);
       expect(result.stderr, backend.name).toBe("");
       expect(result.code).toBe(EXIT.ok);
-      expect(await hashOf(db)).toBe(manifestOf(file).contentsHash);
+      expect(await hashOf(db)).toBe(expected);
     }
   }, TEST_TIMEOUT_MS);
 });
