@@ -87,6 +87,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The ledger worker's memory no longer grows for as long as a sync runs, until a package aborts at the 4 GiB a 32-bit
+  package can address (Mainnet from genesis, at block 2,947,480). The worker held one ledger state from block to block,
+  so every node a block loaded stayed loaded; it now frees that state and loads it again from its key every 1,000
+  blocks. Over 14,808 Mainnet blocks from 3,581,192 its memory levelled off at 1.1 GiB, where it reached 2.3 GiB and
+  still grew before. The vendored packages also no longer keep a dead cache entry for each node key they hand out
+  (`hold_as_node` in patch `0003-ledger-wasm-node-store-exports`). The four packages are recorded again, so the core
+  version changes: a database an earlier build synced continues as an upgrade, its `core` revision kept as a
+  `versionEntry`.
+
 - A backup or restore of a database whose ledger state holds more than 2^24 node keys (stored and embedded; Preprod
   at height 3.5 million) no longer fails with `RangeError: Set maximum size exceeded`: the contents hash of
   `core-ledger-state`'s node tables holds the keys in sets sharded by their first byte and hashes the node set key by
