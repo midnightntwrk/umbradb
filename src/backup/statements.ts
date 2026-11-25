@@ -12,9 +12,12 @@
  * **`psql`'s meta-commands:** `pg_dump` 18 writes `\restrict <key>` first and `\unrestrict <key>` last (they forbid
  * any other meta-command in between, so a crafted file cannot run one); a line starting with `\` where a statement
  * would start is a meta-command. `\restrict` and `\unrestrict` are taken as `psql` takes them (the key must match);
- * any other meta-command is refused, and so is a `COPY … FROM stdin` (its data lines are no SQL; `--inserts` never
- * writes one) and a file that ends inside a statement, a string or a comment: `backup-format-unknown`, found by the
- * check before loading ({@link checkStatements}), so nothing of such a file runs.
+ * any other meta-command is refused, and so is a file that ends inside a statement, a string, a comment or a `COPY`'s
+ * data: `backup-format-unknown`, found by the check before loading ({@link checkStatements}), so nothing of such a file
+ * runs.
+ *
+ * **`COPY … FROM stdin`:** its data follows on the lines after it, up to a line `\.`, as `psql` reads it. The data
+ * lines are not SQL, so they are passed through unparsed, in chunks of whole lines; the statement must end its line.
  */
 
 import { formatUnknown } from "./manifest.js";
@@ -27,10 +30,21 @@ type State =
   | { readonly kind: "dollar"; readonly tag: string }
   | { readonly kind: "block-comment"; readonly depth: number };
 
-/** One piece of the file: a statement to run, or a `psql` meta-command with its line (1-based). */
+/**
+ * One piece of the file, with its line (1-based): a statement to run, a `COPY … FROM stdin` (`copy`), one line of its
+ * data, the `\.` that ends the data, or a `psql` meta-command.
+ */
 export type Piece =
-  | { readonly kind: "statement"; readonly sql: string; readonly line: number }
+  | { readonly kind: "statement" | "copy"; readonly sql: string; readonly line: number }
+  | { readonly kind: "copy-data"; readonly text: string; readonly line: number }
+  | { readonly kind: "copy-end"; readonly line: number }
   | { readonly kind: "meta"; readonly command: string; readonly line: number };
+
+/** What a restore runs, in order: a statement, a `COPY … FROM stdin`, then its data in chunks, then its end. */
+export type DumpPiece =
+  | { readonly kind: "statement" | "copy"; readonly sql: string; readonly line: number }
+  | { readonly kind: "copy-data"; readonly text: string }
+  | { readonly kind: "copy-end" };
 
 const CODE: State = { kind: "code" };
 const IDENTIFIER_CHAR = /[A-Za-z0-9_$\u0080-￿]/;
@@ -39,6 +53,8 @@ const DOLLAR_TAG = /^\$([A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/;
 /** Splits SQL into its pieces (see the module comment): fed lines, it gives each piece once it is complete. */
 export class StatementSplitter {
   #state: State = CODE;
+  /** Inside a `COPY … FROM stdin`'s data. */
+  #copying = false;
   #text = "";
   /** Whether the statement so far holds anything but blank space and comments. */
   #content = false;
@@ -49,6 +65,14 @@ export class StatementSplitter {
   push(line: string): Piece[] {
     this.#line += 1;
     const pieces: Piece[] = [];
+    if (this.#copying) {
+      if (line === "\\.") {
+        this.#copying = false;
+        this.#startLine = this.#line;
+        return [{ kind: "copy-end", line: this.#line }];
+      }
+      return [{ kind: "copy-data", text: line, line: this.#line }];
+    }
     if (this.#state.kind === "code" && !this.#content && line.startsWith("\\")) {
       pieces.push({ kind: "meta", command: line, line: this.#line });
       this.#text = "";
@@ -74,11 +98,25 @@ export class StatementSplitter {
         }
         if (char === ";") {
           this.#text += ";";
-          if (this.#content) pieces.push({ kind: "statement", sql: this.#text.trim(), line: this.#startLine });
+          const sql = this.#text.trim();
+          const copy = this.#content && COPY_FROM_STDIN.test(sql);
+          const at = this.#startLine;
+          if (this.#content) pieces.push({ kind: copy ? "copy" : "statement", sql, line: at });
           this.#text = "";
           this.#content = false;
           this.#startLine = this.#line;
           i += 1;
+          if (copy) {
+            // The data starts on the next line, as psql reads it.
+            if (text.slice(i).trim() !== "") {
+              throw formatUnknown(`its COPY … FROM stdin at line ${at} does not end its line`, {
+                reason: "copy-not-at-line-end",
+                line: at,
+              });
+            }
+            this.#copying = true;
+            break;
+          }
           continue;
         }
         if (char === "'") {
@@ -166,6 +204,12 @@ export class StatementSplitter {
 
   /** Ends the file: what is left must be blank space and comments, outside any string, body or comment. */
   end(): void {
+    if (this.#copying) {
+      throw formatUnknown(`the file ends inside a COPY's data (from line ${this.#startLine}), so it is not a whole dump`, {
+        reason: "truncated",
+        line: this.#startLine,
+      });
+    }
     if (this.#state.kind !== "code" || this.#content) {
       const inside = {
         code: "a statement",
@@ -214,44 +258,47 @@ export class MetaCommands {
   }
 }
 
-/** Refuses a statement a restore cannot run as written (`COPY … FROM stdin`). */
-export function checkStatement(piece: Extract<Piece, { kind: "statement" }>): void {
-  if (COPY_FROM_STDIN.test(piece.sql)) {
-    throw formatUnknown(
-      `it holds a COPY … FROM stdin at line ${piece.line}, whose data psql alone reads (a dump written with --inserts ` +
-        "has none)",
-      { reason: "copy-from-stdin", line: piece.line },
-    );
-  }
-}
+/** How much of a `COPY`'s data one chunk holds at most (in characters), besides its last line. */
+export const COPY_CHUNK = 1 << 20;
 
-/** Splits `lines` (the file's lines after its manifest) into pieces, checking each; yields the statements to run. */
-export async function* statementsOf(
-  lines: AsyncIterable<string>,
-  firstLine = 2,
-): AsyncGenerator<Extract<Piece, { kind: "statement" }>> {
+/**
+ * Splits `lines` (the file's lines after its manifest) into what a restore runs, checking each piece: a `COPY`'s data
+ * lines come as chunks of whole lines, each line ending in a line feed.
+ */
+export async function* statementsOf(lines: AsyncIterable<string>, firstLine = 2): AsyncGenerator<DumpPiece> {
   const splitter = new StatementSplitter();
   const meta = new MetaCommands();
   const offset = firstLine - 1;
+  let chunk: string[] = [];
+  let size = 0;
   for await (const line of lines) {
     for (const piece of splitter.push(line)) {
       if (piece.kind === "meta") meta.take({ ...piece, line: piece.line + offset });
-      else {
-        const placed = { ...piece, line: piece.line + offset };
-        checkStatement(placed);
-        yield placed;
-      }
+      else if (piece.kind === "copy-data") {
+        chunk.push(piece.text, "\n");
+        size += piece.text.length + 1;
+        if (size >= COPY_CHUNK) {
+          yield { kind: "copy-data", text: chunk.join("") };
+          chunk = [];
+          size = 0;
+        }
+      } else if (piece.kind === "copy-end") {
+        if (size > 0) yield { kind: "copy-data", text: chunk.join("") };
+        chunk = [];
+        size = 0;
+        yield { kind: "copy-end" };
+      } else yield { ...piece, line: piece.line + offset };
     }
   }
   splitter.end();
 }
 
 /**
- * Reads every piece of `lines` without running any (the restore's check before loading); resolves with the statement
- * count.
+ * Reads every piece of `lines` without running any (the restore's check before loading); resolves with the count of
+ * statements, a `COPY` counted as one.
  */
 export async function checkStatements(lines: AsyncIterable<string>, firstLine = 2): Promise<number> {
   let count = 0;
-  for await (const _statement of statementsOf(lines, firstLine)) count += 1;
+  for await (const piece of statementsOf(lines, firstLine)) if (piece.kind === "statement" || piece.kind === "copy") count += 1;
   return count;
 }

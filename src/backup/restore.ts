@@ -6,8 +6,8 @@
  *    `public`, or an extension other than `plpgsql` ({@link isEmptyDatabase}). A PGlite directory with no database in
  *    it yet is empty, and is not opened, which would create one.
  * 2. `backup-format-unknown`: the first line is no manifest of format 1 (`./manifest.ts`), or the dump after it is not
- *    one a restore runs (`./statements.ts`: a `psql` meta-command other than `\restrict`/`\unrestrict`, a `COPY … FROM
- *    stdin`, a file ending inside a statement). The whole file is read for this, and none of it is run.
+ *    one a restore runs (`./statements.ts`: a `psql` meta-command other than `\restrict`/`\unrestrict`, a file ending
+ *    inside a statement or a `COPY`'s data). The whole file is read for this, and none of it is run.
  * 3. `backup-history-mismatch`: the configuration's S is not the manifest's, or its history differs from the
  *    manifest's up to the manifest's height, versions included. This is the configuration history's own check
  *    (`checkHistory`) against the manifest's rows at its height, and it names that check's refusal (`missing-entry`,
@@ -24,7 +24,7 @@
  * **Then, in one transaction on the writer connection** (on PGlite, one job of its queue), after the writer started
  * (its lock and the durability probe):
  * - the target is checked empty again;
- * - the file's statements run one by one;
+ * - the file's statements run one by one, a `COPY … FROM stdin` with its data (`src/db/copy-in.ts`);
  * - every setting the file set is reset (`RESET ALL`);
  * - the owners and grants of a database built by migrations are given (`restoreOwnership`, `src/db/roles.ts`, and
  *   `restoreGrants`, `src/db/migrate.ts`), and the module roles are created where the server lacks them;
@@ -82,6 +82,7 @@ import { checkHistory, graphInputOf, type HistoryRow } from "../config/history.j
 import type { PlainObject } from "../config/plain-data.js";
 import type { CheckedConfig, CheckedEntry } from "../config/validate.js";
 import type { Database, Transaction } from "../db/api.js";
+import { copyIn } from "../db/copy-in.js";
 import { UmbraError } from "../db/errors.js";
 import { checkRecordedMigrations, restoreGrants } from "../db/migrate.js";
 import { restoreOwnership, type SchemaPlan } from "../db/roles.js";
@@ -416,12 +417,34 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
 const STORED_ROOT_SQL = `SELECT CASE WHEN to_regclass('core_ledger_state.states') IS NULL THEN NULL
   ELSE (SELECT state_root FROM core_ledger_state.states WHERE height = $1) END AS root`;
 
+/**
+ * The dump's statements as steps to run in a transaction, in order: a `COPY … FROM stdin` is one step with its data.
+ * Each step must run before the next is asked for, since a `COPY`'s step reads its data from the same pieces.
+ */
+async function* steps(file: string | BackupText): AsyncGenerator<(tx: Transaction) => Promise<void>> {
+  const pieces = statementsOf(textOf(file).lines());
+  async function* data(): AsyncGenerator<string> {
+    for (;;) {
+      const next = await pieces.next();
+      if (next.done === true || next.value.kind === "copy-end") return;
+      if (next.value.kind === "copy-data") yield next.value.text;
+    }
+  }
+  for (;;) {
+    const next = await pieces.next();
+    if (next.done === true) return;
+    const piece = next.value;
+    if (piece.kind === "statement") yield async (tx) => void (await tx.execute(piece.sql));
+    else if (piece.kind === "copy") yield (tx) => copyIn(tx, piece.sql, data());
+  }
+}
+
 /** The load and the checks after it, in `tx` (see the module comment); resolves with how many statements ran. */
 async function load(tx: Transaction, input: RestoreInput, checked: Checked, seams: RestoreSeams): Promise<number> {
   if (!(await isEmptyDatabase(tx))) throw notEmpty();
   let count = 0;
-  for await (const statement of statementsOf(textOf(input.file).lines())) {
-    await tx.execute(statement.sql);
+  for await (const step of steps(input.file)) {
+    await step(tx);
     count += 1;
     await seams.statementRan?.(count);
   }
@@ -467,8 +490,8 @@ export async function restoreBackup(input: RestoreInput, seams: RestoreSeams = {
     let statements: number;
     if (seams.statementByStatement === true) {
       statements = 0;
-      for await (const statement of statementsOf(textOf(input.file).lines())) {
-        await opened.transaction((tx) => tx.execute(statement.sql));
+      for await (const step of steps(input.file)) {
+        await opened.transaction(step);
         statements += 1;
         await seams.statementRan?.(statements);
       }

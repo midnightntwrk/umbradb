@@ -59,6 +59,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A PostgreSQL backup holds its rows as `COPY … FROM stdin` data instead of one `INSERT` per row (`pg_dump` without
+  `--inserts`), and a restore loads that data through the driver's `COPY`, still in one transaction: a restore of a
+  1.5 GB backup took 19 s instead of 11 minutes. Earlier backups, and PGlite's, which stay `INSERT`s, restore as
+  before. A build without this change refuses the new backups (`backup-format-unknown`).
+
 - `core-contract-logs-fast` records a log site it cannot read from the transcripts (`not-a-literal`, `conditional`,
   `partial-transaction`) as an unresolved site, in the new table `contract_logs.unresolved` (the shared item's
   migration `002`) and in the `contract-logs` block item, instead of halting with `fast-log-unsupported`, which is

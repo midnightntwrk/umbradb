@@ -326,9 +326,9 @@ Before loading, restore checks the target, manifest, configuration history, migr
 (`src/backup/restore.ts:454`, `src/backup/restore.ts:301`, `src/backup/restore.ts:315`,
 `src/backup/restore.ts:328`, `src/backup/restore.ts:360`).
 The splitter is a format reader, not a SQL safety policy: apart from malformed or truncated input, it refuses
-`psql` meta-commands other than matching `\restrict` and `\unrestrict`, and `COPY … FROM stdin`
-(`src/backup/statements.ts:169`, `src/backup/statements.ts:197`,
-`src/backup/statements.ts:201`, `src/backup/statements.ts:219`).
+`psql` meta-commands other than matching `\restrict` and `\unrestrict`, and passes a `COPY … FROM stdin`'s data
+lines to the server unparsed (`src/backup/statements.ts:76`, `src/backup/statements.ts:237`,
+`src/backup/statements.ts:102`, `src/backup/statements.ts:207`).
 It does not restrict SQL to safe data-loading operations.
 
 Post-load checks can refuse damaged or incompatible data, but run after the file has exercised the writer's

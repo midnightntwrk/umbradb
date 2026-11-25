@@ -71,6 +71,7 @@ import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../determini
 import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
 import { pgliteNeedsDevelopmentOptIn } from "./durability-probe.js";
+import { allowCopyIn, copyFromBlob } from "./copy-in.js";
 import { allowMultiStatement } from "./multi-statement.js";
 import { READS_BYPASS_QUEUE } from "./pglite-build-flags.js";
 import { acquirePgliteLock } from "./pglite-lock.js";
@@ -482,6 +483,13 @@ class PgliteDatabase implements Database {
         allowMultiStatement(tx, async (sql) => {
           if (!open) throw handleClosed("transaction");
           await this.script(sql);
+        });
+        allowCopyIn(tx, async (sql, chunks) => {
+          const fromBlob = copyFromBlob(sql);
+          for await (const chunk of chunks) {
+            if (!open) throw handleClosed("transaction");
+            await this.send(() => this.engine.query(fromBlob, [], { ...this.options, blob: new Blob([chunk]) }));
+          }
         });
         let result: T;
         try {

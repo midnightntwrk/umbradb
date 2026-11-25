@@ -298,7 +298,9 @@ describe.each(BACKUP_BACKENDS)("each restore refusal on $name, in its order", (b
       expect((await refused(variant("format-2", format2), config, "backup-format-unknown"))).toContain("format is 2");
       const meta = text.replace("\nCREATE SCHEMA ticker;", "\n\\! touch hacked\nCREATE SCHEMA ticker;");
       expect(await refused(variant("meta", meta), config, "backup-format-unknown")).toContain("psql meta-command");
-      const cut = text.slice(0, text.indexOf("INSERT INTO ticker.rows") + 40);
+      // Cut inside the rows: an INSERT (PGlite's dump), or a COPY's data (pg_dump's).
+      const rowsAt = text.search(/^(?:INSERT INTO|COPY) ticker\.rows/m);
+      const cut = text.slice(0, text.startsWith("COPY", rowsAt) ? text.indexOf("\n", rowsAt) + 10 : rowsAt + 40);
       expect(await refused(variant("cut", cut), config, "backup-format-unknown")).toContain("ends inside");
       await empty();
       // The whole dump is read before the chain is: a file cut short is refused before a node of another chain is.
@@ -334,10 +336,25 @@ describe.each(BACKUP_BACKENDS)("each restore refusal on $name, in its order", (b
       await refused(file, config, "backup-block-not-finalized", chain(HEAD, [otherAtH]));
       await empty();
 
+      // While loading: a COPY whose data the server refuses (pg_dump writes COPY; PGlite's dump, INSERTs) rolls back.
+      const copyRows = /\nCOPY ticker\.rows [^\n]*\n/;
+      expect(copyRows.test(text)).toBe(backend.kind === "postgres");
+      if (backend.kind === "postgres") {
+        const badCopy = text.replace(copyRows, (line) => `${line}not-a-height\tx\n`);
+        expect(await refused(variant("bad-copy", badCopy), config, "database-error")).toContain("refused the data of COPY");
+        await empty();
+      }
+
       // A changed value in a table declared deterministic: false is restored, the contents hash the source's.
-      const logged = text.match(/^INSERT INTO ticker\.log VALUES \(3, 3, '[^']*'\);$/m)?.[0] as string;
+      // Its row as an INSERT (PGlite's dump) or a line of the table's COPY data (pg_dump's).
+      const inserted = text.match(/^INSERT INTO ticker\.log VALUES \(3, 3, '[^']*'\);$/m)?.[0];
+      const copied = text.slice(text.indexOf("COPY ticker.log")).match(/^3\t3\t[^\t\n]+$/m)?.[0];
+      const logged = (inserted ?? copied) as string;
       expect(logged).toBeDefined();
-      const loggedOther = logged.replace(/'[^']*'/, "'2000-01-01 00:00:00+00'");
+      const loggedOther =
+        inserted === undefined
+          ? logged.replace(/[^\t]+$/, "2000-01-01 00:00:00+00")
+          : logged.replace(/'[^']*'/, "'2000-01-01 00:00:00+00'");
       const restored = await restoreRun(variant("opted-out", text.replace(logged, loggedOther)), config);
       expect(restored.code).toBe(EXIT.ok);
       expect(await hashOf(db)).toBe(before.hash);

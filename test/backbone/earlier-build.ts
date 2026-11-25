@@ -140,7 +140,7 @@ export const CATALOG_SQL = `SELECT name FROM (
 
 /**
  * The text of a backup file with `part`'s recorded migrations an earlier build's: in its manifest (its first line) and
- * in the dump's `INSERT` of `core_chain.migrations`. Throws when the backup holds no row of `part`.
+ * in the dump's rows of `core_chain.migrations` (`COPY` or `INSERT`). Throws when the backup holds no row of `part`.
  */
 export function earlierBackup(text: string, part: FoldedPart): string {
   const end = text.indexOf("\n");
@@ -157,22 +157,31 @@ export function earlierBackup(text: string, part: FoldedPart): string {
   const migrations = [...others.slice(0, at), ...earlier, ...others.slice(at)];
   const line = manifestLine({ ...manifest, migrations });
   const dump = text.slice(end + 1).split("\n");
-  const inserts = dump.flatMap((statement, index) =>
-    statement.startsWith("INSERT INTO core_chain.migrations ") && statement.includes(`'${part}'`) ? [index] : [],
-  );
-  if (inserts.length !== THIS_BUILD[part].length) {
-    throw new Error(`the backup's dump holds ${inserts.length} rows of ${part}'s migrations, not ${THIS_BUILD[part].length}`);
+  const copy = dump.findIndex((statement) => statement.startsWith("COPY core_chain.migrations "));
+  const done = copy < 0 ? -1 : dump.indexOf("\\.", copy);
+  // PostgreSQL's pg_dump writes COPY rows (tab-separated); PGlite's forces --inserts.
+  const isRow = (row: string, index: number): boolean =>
+    copy < 0
+      ? row.startsWith("INSERT INTO core_chain.migrations ") && row.includes(`'${part}'`)
+      : index > copy && index < done && row.startsWith(`${part}\t`);
+  const rows = dump.flatMap((row, index) => (isRow(row, index) ? [index] : []));
+  if (rows.length !== THIS_BUILD[part].length) {
+    throw new Error(`the backup's dump holds ${rows.length} rows of ${part}'s migrations, not ${THIS_BUILD[part].length}`);
   }
-  const [first] = inserts as [number];
+  const [first] = rows as [number];
   const template = dump[first] as string;
   const own = THIS_BUILD[part][0] as RecordedMigration;
   if (!template.includes(own.checksum)) throw new Error(`the dump's row of ${part}'s 001 does not hold its checksum`);
-  const rows = earlierRows(part).map((row) =>
-    template
-      .replace(own.checksum, row.checksum)
-      .replace(`'${own.id}'`, `'${row.id}'`)
-      .replace(new RegExp(`, ${own.position}\\);$`), `, ${row.position});`),
-  );
-  const rewritten = dump.flatMap((statement, index) => (index === first ? rows : inserts.includes(index) ? [] : [statement]));
+  const copied = earlierRows(part).map((row) => {
+    if (copy < 0) {
+      return template
+        .replace(own.checksum, row.checksum)
+        .replace(`'${own.id}'`, `'${row.id}'`)
+        .replace(new RegExp(`, ${own.position}\\);$`), `, ${row.position});`);
+    }
+    const [, , checksum] = template.split("\t") as [string, string, string, string];
+    return [part, row.id, checksum.replace(own.checksum, row.checksum), String(row.position)].join("\t");
+  });
+  const rewritten = dump.flatMap((row, index) => (index === first ? copied : rows.includes(index) ? [] : [row]));
   return line + rewritten.join("\n");
 }
