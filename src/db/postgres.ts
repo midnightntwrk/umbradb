@@ -290,6 +290,11 @@ function schemaChangesOf(connection: DriverConnectionOptions): SchemaChanges {
   return changes;
 }
 
+/** The `COPY` command of `text`, without the comments `pg_dump` writes before it. */
+function copyCommand(text: string): string {
+  return text.replace(/^--.*$/gm, "").trim().slice(0, 200).replace(/;$/, "");
+}
+
 /** One connection, used until it is lost or ended (see the module comment). */
 class Session {
   private readonly sql: Sql;
@@ -446,7 +451,7 @@ class Session {
       if (classified.details.sqlstate !== "25P02") throw classified;
       throw new UmbraError(
         "database-error",
-        `PostgreSQL refused the data of ${text.slice(0, 200).replace(/;\s*$/, "")}; the server's log names why`,
+        `PostgreSQL refused the data of ${copyCommand(text)}; the server's log names why`,
         { sqlstate: "25P02", reason: "copy-refused" },
         { cause: error },
       );
