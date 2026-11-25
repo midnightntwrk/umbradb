@@ -606,14 +606,6 @@ const CHANGES: readonly (Case & { readonly rule: string; readonly path: string; 
     field: "version",
   },
   {
-    name: "a module's stop added at the cursor",
-    first: { entries: [CORE, m(10)], cursor: null },
-    then: { entries: [CORE, m(10, {}, 20)], cursor: C },
-    rule: "stop",
-    path: "entries[1].stop",
-    field: "stop",
-  },
-  {
     name: "a module's recorded stop below the cursor raised",
     first: { entries: [CORE, m(10, {}, 15)], cursor: null },
     then: { entries: [CORE, m(10, {}, 30)], cursor: C },
@@ -667,6 +659,13 @@ const ACCEPTED: readonly (Case & {
     name: "a module's stop above the cursor removed",
     first: { entries: [CORE, m(10, {}, 30)], cursor: null },
     then: { entries: [CORE, m(10)], cursor: C },
+    writes: [["m", 10]],
+    allowance: "stop",
+  },
+  {
+    name: "a module's stop added at the cursor",
+    first: { entries: [CORE, m(10)], cursor: null },
+    then: { entries: [CORE, m(10, {}, 20)], cursor: C },
     writes: [["m", 10]],
     allowance: "stop",
   },
@@ -857,10 +856,11 @@ describe("configuration changes only the future", () => {
     expect(found(error)).toEqual([["data", "entries[1].config", null]]);
   });
 
-  it("treats no stop as above every cursor (the allowance)", () => {
+  it("treats no stop as above every cursor, and accepts a new stop at the cursor (the allowance)", () => {
     expect(stopChangeAllowed(30n, null, C)).toBe(true);
     expect(stopChangeAllowed(null, 21n, C)).toBe(true);
-    expect(stopChangeAllowed(null, 20n, C)).toBe(false);
+    expect(stopChangeAllowed(null, 20n, C)).toBe(true);
+    expect(stopChangeAllowed(null, 19n, C)).toBe(false);
     expect(stopChangeAllowed(20n, null, C)).toBe(false);
     expect(stopChangeAllowed(21n, 22n, C)).toBe(true);
   });

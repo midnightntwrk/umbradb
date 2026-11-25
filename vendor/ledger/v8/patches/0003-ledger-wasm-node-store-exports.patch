@@ -102,7 +102,7 @@ new file mode 100644
 index 0000000..16947aa
 --- /dev/null
 +++ b/ledger-wasm/src/umbradb.rs
-@@ -0,0 +1,365 @@
+@@ -0,0 +1,367 @@
 +// This file is part of midnight-ledger.
 +// Copyright (C) Midnight Foundation
 +// SPDX-License-Identifier: Apache-2.0
@@ -149,7 +149,7 @@ index 0000000..16947aa
 +thread_local! {
 +    /// Objects whose keys this module handed out since the previous flush, kept alive so that
 +    /// their pending nodes are still in memory when `flushNodes` runs.
-+    static HELD: RefCell<Vec<Sp<dyn Any + Send + Sync, InMemoryDB>>> = const { RefCell::new(Vec::new()) };
++    static HELD: RefCell<Vec<Box<dyn Any>>> = const { RefCell::new(Vec::new()) };
 +    /// Net root-count changes since the previous flush.
 +    static ROOT_DELTAS: RefCell<BTreeMap<Key, i64>> = const { RefCell::new(BTreeMap::new()) };
 +}
@@ -299,7 +299,9 @@ index 0000000..16947aa
 +fn hold_as_node<T: Storable<InMemoryDB>>(value: T) -> Key {
 +    let sp = Sp::new(value).into_tracked();
 +    let key = sp.hash();
-+    HELD.with(|held| held.borrow_mut().push(sp.upcast()));
++    // Boxed, not upcast: `Sp::drop` clears its `sp_cache` entry by `TypeId::of::<T>()`, so an
++    // `Sp<dyn Any>` would leave the typed entry behind for good.
++    HELD.with(|held| held.borrow_mut().push(Box::new(sp)));
 +    key
 +}
 +

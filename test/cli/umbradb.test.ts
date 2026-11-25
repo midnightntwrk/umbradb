@@ -78,7 +78,7 @@ describe("the command's usage and its commands", () => {
     expect(result).toEqual({
       code: EXIT.usage,
       stdout: "",
-      stderr: `umbradb: restore takes one backup file: umbradb restore <file> [--config <file>]\n\n${USAGE}`,
+      stderr: `umbradb: restore takes one backup file: umbradb restore <file> [--config <file>] [--overwrite-history]\n\n${USAGE}`,
     });
   });
 });

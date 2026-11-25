@@ -156,7 +156,11 @@ export type Entry = {
 };
 
 /** A process's configuration: the configuration file's default export. */
-export type UmbraConfig = { readonly entries: readonly Entry[] };
+export type UmbraConfig = {
+  readonly entries: readonly Entry[];
+  /** A recorded history file (`umbradb restore`, `umbradb history export`), relative to the configuration file. */
+  readonly history?: string;
+};
 
 /** The heights every builder takes. */
 export type EntryHeights = { readonly start: number; readonly stop?: number };

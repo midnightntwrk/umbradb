@@ -31,7 +31,7 @@ function schemaItem(item: ItemDeclaration): SchemaItem {
 
 /**
  * The content-defined tables `declarations` declare, each item's once, with their schema and content function: what a
- * contents hash computed outside a process's schema plan is given (`umbradb backup`, the exported `contentsHash`).
+ * contents hash computed outside a process's schema plan is given (the exported `contentsHash`).
  */
 export function declaredContentDefined(declarations: readonly ModuleDeclaration[]): ContentDefinedTables[] {
   const out = new Map<string, ContentDefinedTables>();

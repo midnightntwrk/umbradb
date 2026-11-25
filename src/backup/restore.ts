@@ -28,9 +28,6 @@
  * - every setting the file set is reset (`RESET ALL`);
  * - the owners and grants of a database built by migrations are given (`restoreOwnership`, `src/db/roles.ts`, and
  *   `restoreGrants`, `src/db/migrate.ts`), and the module roles are created where the server lacks them;
- * - the contents hash is recomputed, with the tables declared `deterministic: false` by name only and the build's
- *   content-defined tables by their content, and compared with the manifest's (`contents-hash-mismatch`); a
- *   content-defined table its content function refuses (`ledger-refcount-invalid`) fails the restore there;
  * - when `core-ledger-state` is in the history, the stored state root at the manifest's height is compared with the
  *   chain's (`backup-root-mismatch`; the node's root is read before the transaction).
  *
@@ -50,7 +47,7 @@
  * its items. Then step 4 runs, then step 6 against the public database's committed head and its block at the
  * manifest's height (`backup-block-not-finalized`).
  *
- * After loading and the contents hash, the binding that the backup's own `core_private_source.cursor` row records (the
+ * After loading, the binding that the backup's own `core_private_source.cursor` row records (the
  * public genesis hash and S it was bound to) is compared with the public database's identity
  * (`private-binding-mismatch`: `genesis`, `start`). So a backup taken against another public database rolls back. The
  * reasons are the private startup's own (`bindingRefusal`, `networkRefusal`, `publicNotStarted` of
@@ -89,7 +86,6 @@ import { UmbraError } from "../db/errors.js";
 import { checkRecordedMigrations, restoreGrants } from "../db/migrate.js";
 import { restoreOwnership, type SchemaPlan } from "../db/roles.js";
 import { startWriter } from "../db/writer-lock.js";
-import { contentsHash } from "../determinism/contents-hash.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import { type PublicItem, resolveGraph } from "../modules/graph.js";
@@ -143,10 +139,10 @@ export interface RestoreSeams {
   /** Called after each statement of the file ran, with how many ran: where the kill test kills a restore. */
   readonly statementRan?: (count: number) => Promise<void> | void;
   /**
-   * The committed negative controls only: skip the contents hash's check, the state root's, or the comparison of a
-   * private backup's recorded binding with its public database.
+   * The committed negative controls only: skip the state root's check, or the comparison of a private backup's
+   * recorded binding with its public database.
    */
-  readonly skip?: { readonly contentsHash?: boolean; readonly stateRoot?: boolean; readonly binding?: boolean };
+  readonly skip?: { readonly stateRoot?: boolean; readonly binding?: boolean };
   /**
    * For the kill test's negative control only: each statement in a transaction of its own, so a kill leaves what ran.
    */
@@ -433,21 +429,8 @@ async function load(tx: Transaction, input: RestoreInput, checked: Checked, seam
   await restoreOwnership(tx, checked.plan);
   await restoreGrants(tx, checked.plan);
   const { manifest } = checked;
-  if (seams.skip?.contentsHash !== true) {
-    const read = { query: (sql: string, params?: unknown[]) => tx.query(sql, params) };
-    const { optedOut, contentDefined } = checked.plan;
-    const hash = hex(await contentsHash(read, { optedOut, contentDefined }));
-    if (hash !== manifest.contentsHash) {
-      throw new UmbraError(
-        "contents-hash-mismatch",
-        `the restored database's contents hash is ${hash}, and the backup's manifest says ${manifest.contentsHash}: ` +
-          "the file's rows are not the backup's; nothing was restored",
-        { restored: hash, backup: manifest.contentsHash },
-      );
-    }
-  }
   if (checked.publicIdentity !== null && seams.skip?.binding !== true) {
-    // The binding the backup's own row records, now that the contents hash showed the rows are the backup's.
+    // The binding the backup's own row records.
     const refusal = bindingRefusal(await readPrivateBinding(tx), checked.publicIdentity, BigInt(manifest.start));
     if (refusal !== null) throw refusal;
   }

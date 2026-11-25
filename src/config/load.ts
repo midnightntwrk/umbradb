@@ -34,11 +34,12 @@
  * on it instead.
  */
 
-import { stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { UmbraError } from "../db/errors.js";
 import { type PlainData, plainData } from "./plain-data.js";
+import { parseHistoryFile, type RecordedHistory } from "./recorded-history.js";
 
 /** The file a process loads when none is given, in its working directory. */
 export const DEFAULT_CONFIG_FILE = "umbradb.config.ts";
@@ -72,6 +73,10 @@ export interface LoadedConfig {
    * empty without the export.
    */
   readonly modules: readonly unknown[];
+  /** The history file the data names (`history`), absolute; null when it names none. */
+  readonly historyFile: string | null;
+  /** That file's history; null when it names none or the file is not there yet. */
+  readonly history: RecordedHistory | null;
 }
 
 /** The name of the configuration file's export of its user modules. */
@@ -127,7 +132,13 @@ export function configModuleUrl(path: string): URL {
 /** Loads the configuration file: see the module comment. */
 export async function loadConfig(options: LoadOptions): Promise<LoadedConfig> {
   const imported = await importConfig(options);
-  return Object.freeze({ file: imported.file, data: imported.data, modules: configModules(imported) });
+  return Object.freeze({
+    file: imported.file,
+    data: imported.data,
+    modules: configModules(imported),
+    historyFile: imported.historyFile,
+    history: imported.history,
+  });
 }
 
 /**
@@ -138,6 +149,8 @@ export interface ImportedConfig {
   readonly file: string;
   readonly data: PlainData;
   readonly exports: Readonly<Record<string, unknown>>;
+  readonly historyFile: string | null;
+  readonly history: RecordedHistory | null;
 }
 
 /**
@@ -182,7 +195,22 @@ export async function importConfig(options: LoadOptions): Promise<ImportedConfig
     );
   }
   const data = plainData(module.default, file);
-  return Object.freeze({ file, data, exports: module });
+  const named = (data as { history?: unknown } | null)?.history;
+  const historyFile = typeof named === "string" && named !== "" ? resolve(dirname(file), named) : null;
+  const history = historyFile === null ? null : await readHistoryFile(historyFile);
+  return Object.freeze({ file, data, exports: module, historyFile, history });
+}
+
+/** The history in the file at `file`, or null when there is none yet. */
+export async function readHistoryFile(file: string): Promise<RecordedHistory | null> {
+  let text: string;
+  try {
+    text = await readFile(file, "utf8");
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === "ENOENT") return null;
+    throw error;
+  }
+  return parseHistoryFile(text, file);
 }
 
 /** The user modules of an imported configuration file: its `modules` export, a list, or none (see the module comment). */

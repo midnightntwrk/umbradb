@@ -26,7 +26,7 @@ describe("ownerOnlyFile through writeBackup", () => {
     const chmod = vi.spyOn(prototype, "chmod").mockRejectedValueOnce(refused);
     const db = await openPglite({ dataDir: "memory://", committedHeight: async () => 1n, developmentOptIn: true });
     try {
-      await expect(writeBackup({ db, target: { backend: "pglite" }, out, optedOut: [], developmentOptIn: true })).rejects.toBe(refused);
+      await expect(writeBackup({ db, target: { backend: "pglite" }, out, developmentOptIn: true })).rejects.toBe(refused);
       expect(chmod).toHaveBeenCalledWith(BACKUP_FILE_MODE);
     } finally {
       chmod.mockRestore();

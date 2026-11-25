@@ -17,7 +17,8 @@ deterministically. Run what you need, extend what is missing.
   the last whole block, and a restart resumes there.
 - **Deterministic.** The same chain gives the same database. Each table has a digest, updated every block, and two
   instances compare one contents hash.
-- **Backup and restore.** A backup is a `pg_dump` file, checked against its contents hash when it is restored.
+- **Backup and restore.** A backup is a `pg_dump` file, checked against the chain and the configuration when it is
+  restored.
 - **Private data apart.** Private modules run in private processes with their own databases; the public database stays
   shareable.
 - **Server and browser.** The same code runs on Node.js with PostgreSQL 18 and in a browser page on PGlite.
@@ -202,8 +203,10 @@ transport reader's login.
 - `umbradb config check <file> [--database]`: type-checks and validates the file without starting anything; with
   `--database`, also checks it against the configuration history of the database the file names, read-only.
 - `umbradb backup --out <file> [--config <file>]`: writes a backup of the configuration's database.
-- `umbradb restore <file> [--config <file>]`: restores a backup into the configuration's database, which must be
-  empty.
+- `umbradb restore <file> [--config <file>] [--overwrite-history]`: restores a backup into the configuration's
+  database, which must be empty.
+- `umbradb history export [--out <file>] [--config <file>]`: writes the database's recorded history to the
+  configuration's history file ([Recorded history](#recorded-history)).
 - `umbradb --help`: the usage.
 
 `--config` defaults to `umbradb.config.ts` in the working directory.
@@ -259,7 +262,7 @@ module test with it, on an in-memory chain; §18 lists its options, its handle, 
 **What a backup holds.** A `pg_dump` file in plain SQL (`--inserts --no-owner --no-privileges`): every table of the
 database at one committed height, so whole blocks only. Its first line is UmbraDB's manifest: the chain's genesis hash,
 S, the height and its block hash, the ledger state root (with `core-ledger-state`), the configuration history, the
-applied migrations with their checksums, the contents hash, and the PostgreSQL, UmbraDB and tool versions. Use a backup
+applied migrations with their checksums, and the PostgreSQL, UmbraDB and tool versions. Use a backup
 to move an indexer, or to start a new one mid-chain without syncing from genesis. To check that two databases agree,
 compare their digests and contents hashes (`/status`), not their files. Every backup file is created owner-only
 (`0600`); UmbraDB neither encrypts nor signs it, so storing, moving and encrypting backups is the operator's.
@@ -271,7 +274,7 @@ npx umbradb backup --out preview-10000.backup [--config umbradb.config.ts]
 ```
 
 ```text
-umbradb backup: wrote …/preview-10000.backup: height 10000, contents hash 0x5f7b75c9…, pglite-tools 18.6
+umbradb backup: wrote …/preview-10000.backup: height 10000, pglite-tools 18.6
 ```
 
 - **PostgreSQL:** runs PostgreSQL 18's `pg_dump` (on `PATH`, or `UMBRADB_PG_DUMP=/path/to/pg_dump`) beside the running
@@ -292,8 +295,7 @@ npx umbradb restore preview-10000.backup [--config umbradb.config.ts]
 ```
 
 ```text
-umbradb restore: restored …/preview-10000.backup: height 10000, contents hash 0x5f7b75c9…; the database resumes
-from 10001
+umbradb restore: restored …/preview-10000.backup: height 10000; the database resumes from 10001
 ```
 
 **Restore only backups you wrote, or trust.** A restore runs the file's SQL with the writer's rights — the database
@@ -302,8 +304,9 @@ they do not make a hostile file safe. The [threat model](docs/THREAT_MODEL.md#ba
 file can do.
 
 The target must be empty: a new PostgreSQL database, or a PGlite directory with no database in it. The configuration
-must be the one the backup's indexer ran with, up to the backup's height (later revisions are allowed), and its build
-must carry the versions and migrations the backup's database used. The command reads the configuration's node, and
+must be the one the backup's indexer ran with, up to the backup's height (later revisions are allowed), unless it
+names a history file ([Recorded history](#recorded-history)), and its build must carry the versions and migrations the
+backup's database used. The command reads the configuration's node, and
 refuses, leaving the target as it was, with:
 
 | Code | Why |
@@ -314,13 +317,33 @@ refuses, leaving the target as it was, with:
 | `backup-build-mismatch` | The build lacks an entry's version or a migration the backup applied |
 | `backup-genesis-mismatch` | The node serves another chain |
 | `backup-block-not-finalized` | The node has not finalized the backup's block, or finalized another at its height |
-| `contents-hash-mismatch` | The restored data is not what the manifest says |
 | `backup-root-mismatch` | With `core-ledger-state`, the restored ledger state root is not the node's |
 
-The first six are checked before loading; the last two after, inside the restore's one transaction, which then rolls
+The first six are checked before loading; the last one after, inside the restore's one transaction, which then rolls
 back. An interrupted restore leaves the target empty. Then `umbradb run` with the same configuration resumes from the
 backup's height + 1. A private process's backup is restored the same way with the private configuration, checked
 against its public database instead of a node ([operator guide](docs/operator-guide.md#restoring-a-backup)).
+
+### Recorded history
+
+A database records every revision it ran, and its configuration must normally list them all, with their versions and
+data. A configuration can instead name a history file and list only what it runs now:
+
+```ts
+export default defineConfig({
+  history: "./umbradb.history.json", // relative to this file
+  entries: [coreEntry({ start: 0, config: { network: "preview", node: "wss://…", database } }), …],
+});
+```
+
+- **`umbradb restore`** writes the backup's history there once the restore commits. It refuses
+  (`backup-history-mismatch`) when a file there holds another history, unless given `--overwrite-history`.
+- **`umbradb history export`** writes the database's own history there. Stop the process first, then export and
+  start the new build.
+- **At startup**, every revision up to the file's height comes from the file. Each entry of the configuration then
+  continues the recorded revision when its version and data are the same, and otherwise starts at the height after
+  the file's. A recorded module the configuration no longer lists stops at that height. Entries starting above it are
+  kept as written.
 
 ## Admin endpoints and process states
 

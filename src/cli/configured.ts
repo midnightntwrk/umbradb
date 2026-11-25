@@ -28,6 +28,7 @@ import type { DatabaseParts, PglitePathParts } from "../config/database-parts.js
 import { findingText, refusalFindings } from "../config/findings.js";
 import { DEFAULT_CONFIG_FILE, type LoadedConfig, loadConfig } from "../config/load.js";
 import type { PlainObject } from "../config/plain-data.js";
+import type { RecordedHistory } from "../config/recorded-history.js";
 import { type Redactor, redactor } from "../config/redact.js";
 import { type CheckedConfig, type CheckedEntry, configSecrets } from "../config/validate.js";
 import type { CommittedHeight, Database } from "../db/api.js";
@@ -57,6 +58,10 @@ export interface CommandConfig {
   readonly developmentOptIn: boolean;
   /** Hides the file's secrets — the database's password among them — and any URL's credentials. */
   readonly redact: Redactor;
+  /** The history file the configuration names (`history`), absolute; null when it names none. */
+  readonly historyFile: string | null;
+  /** The history file's contents, read before the command: null when the file is not there. */
+  readonly existingHistory: RecordedHistory | null;
 }
 
 /** A refusal of the configuration file itself, with its findings in its message, each with its path. */
@@ -73,9 +78,12 @@ function configurationRefused(error: unknown, file: string): UmbraError {
 }
 
 /** Reads the configuration (see the module comment); rejects with its refusal, the redaction of its secrets with it. */
-export async function readCommandConfig(
-  options: { readonly file?: string | undefined; readonly cwd: string },
-): Promise<CommandConfig> {
+export async function readCommandConfig(options: {
+  readonly file?: string | undefined;
+  readonly cwd: string;
+  /** Resolves with this history in place of the history file's, when the configuration names one (a restore's). */
+  readonly history?: RecordedHistory;
+}): Promise<CommandConfig> {
   const file = resolve(options.cwd, options.file ?? DEFAULT_CONFIG_FILE);
   let loaded: LoadedConfig;
   try {
@@ -88,7 +96,8 @@ export async function readCommandConfig(
   const redact = redactor(configSecrets({ config: loaded, declarations, side }));
   let resolved: ResolvedConfig;
   try {
-    resolved = resolveConfig({ data: loaded.data, file: loaded.file, declarations, side });
+    const history = loaded.historyFile === null ? null : (options.history ?? loaded.history);
+    resolved = resolveConfig({ data: loaded.data, file: loaded.file, declarations, side, history });
   } catch (error) {
     throw configurationRefused(error, loaded.file);
   }
@@ -104,6 +113,8 @@ export async function readCommandConfig(
     database: settings.database as unknown as DatabaseParts,
     developmentOptIn: settings.developmentOptIn === true,
     redact,
+    historyFile: loaded.historyFile,
+    existingHistory: loaded.history,
   });
 }
 
@@ -166,16 +177,4 @@ export async function openRestoreTarget(
     if (created !== null) log(createdDirectoryLine((config.database as PglitePathParts).path, created));
   }
   return openCommandDatabase(target, config);
-}
-
-/** The tables the build declares `deterministic: false`: every module of `declarations`, each table once. */
-export function declaredOptOuts(declarations: DeclarationSet<ModuleDeclaration>): { schema: string; table: string }[] {
-  const out = new Map<string, { schema: string; table: string }>();
-  for (const declaration of [...declarations.backbone, ...declarations.core, ...declarations.user]) {
-    for (const item of declaration.provides) {
-      if (item.table?.deterministic !== false) continue;
-      for (const table of item.table.tables) out.set(JSON.stringify([item.table.schema, table]), { schema: item.table.schema, table });
-    }
-  }
-  return [...out.values()];
 }

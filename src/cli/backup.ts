@@ -4,8 +4,7 @@
  *
  * - **Which database, and its build.** The configuration file (`--config`, or `umbradb.config.ts` in the working
  *   directory, as for `umbradb run`) gives the database (from its process's `core` revision), the development opt-in
- *   and the side. The command's build with the file's user modules gives the tables declared `deterministic: false`,
- *   which the contents hash records by name only, and the content-defined tables, which it takes by their content.
+ *   and the side.
  * - **While the process runs.** On PostgreSQL the command reads through a connection of its own, in one read's
  *   snapshot, beside a process writing the same database. A PGlite directory can be opened by one process at a time:
  *   while a process holds it, the command refuses with `writer-lock-held`, and the process itself backs it up (its
@@ -19,8 +18,7 @@
  *     it would create one;
  *   - the database's failures.
  *
- * The command prints one line on stdout when the backup is written: the file, the height, the contents hash and the
- * tool. Nothing it prints holds a secret: every text passes through the redaction of the file's secrets (the database
+ * The command prints one line on stdout when the backup is written: the file, the height and the tool. Nothing it prints holds a secret: every text passes through the redaction of the file's secrets (the database
  * URL among them) and of any URL's credentials.
  */
 
@@ -30,11 +28,9 @@ import { redactor } from "../config/redact.js";
 import { UmbraError } from "../db/errors.js";
 import { type BackupSeams, writeBackup } from "../backup/backup.js";
 import type { Environment } from "../backup/tools.js";
-import { declaredContentDefined } from "../modules/adapters.js";
 import {
   type CommandConfig,
   commandTarget,
-  declaredOptOuts,
   openCommandDatabase,
   readCommandConfig,
 } from "./configured.js";
@@ -119,12 +115,6 @@ export async function runBackup(options: BackupCommandOptions, seams: BackupSeam
           db,
           target: target.backend === "postgres" ? { backend: "postgres", connection: target.connection } : { backend: "pglite" },
           out,
-          optedOut: declaredOptOuts(config.declarations),
-          contentDefined: declaredContentDefined([
-            ...config.declarations.backbone,
-            ...config.declarations.core,
-            ...config.declarations.user,
-          ]),
           side: config.side,
           developmentOptIn: config.developmentOptIn,
           ...(options.env === undefined ? {} : { env: options.env }),
@@ -132,7 +122,7 @@ export async function runBackup(options: BackupCommandOptions, seams: BackupSeam
         seams,
       );
       const tool = `${manifest.tool.name} ${manifest.tool.version}`;
-      const line = `umbradb backup: wrote ${out}: height ${manifest.height}, contents hash ${manifest.contentsHash}, ${tool}`;
+      const line = `umbradb backup: wrote ${out}: height ${manifest.height}, ${tool}`;
       return { written: true, line: redact.text(line) };
     } finally {
       await db.close();

@@ -81,7 +81,6 @@ export interface SavedBackup {
   readonly file: string;
   readonly height: string;
   readonly start: string;
-  readonly contentsHash: string;
   /** The file's size in bytes. */
   readonly bytes: number;
 }
@@ -93,7 +92,6 @@ export type RestoreRecord =
       readonly restored: true;
       readonly start: number;
       readonly height: string;
-      readonly contentsHash: string;
       readonly statements: number;
     }
   | {
@@ -271,7 +269,7 @@ const coreBegun = new Promise<void>((resolve) => {
 
 /** Backs the core's database up and saves the file (see the module comment). */
 async function backUp(): Promise<SavedBackup> {
-  const made = (await core.call("backup")) as { height: string; start: string; contentsHash: string; text: string };
+  const made = (await core.call("backup")) as { height: string; start: string; text: string };
   const blob = new Blob([made.text], { type: "application/octet-stream" });
   const file = `umbradb-${storage}-${made.height}.backup`;
   const url = URL.createObjectURL(blob);
@@ -280,7 +278,7 @@ async function backUp(): Promise<SavedBackup> {
   link.download = file;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  const saved: SavedBackup = { file, height: made.height, start: made.start, contentsHash: made.contentsHash, bytes: blob.size };
+  const saved: SavedBackup = { file, height: made.height, start: made.start, bytes: blob.size };
   backups.push(saved);
   return saved;
 }
@@ -300,7 +298,6 @@ async function restoreFrom(file: Blob, name: string): Promise<RestoreRecord> {
     const made = (await core.call("restore", file, run)) as {
       start: number;
       height: string;
-      contentsHash: string;
       statements: number;
     };
     record = { file: name, restored: true, ...made };

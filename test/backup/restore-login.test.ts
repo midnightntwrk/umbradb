@@ -15,7 +15,6 @@ import {
   type BackupDatabase,
   catalogOf,
   hashOf,
-  manifestOf,
   startTicker,
   tickerModule,
   writeTickerConfig,
@@ -83,7 +82,7 @@ describe("a restore by a login that is not a superuser", () => {
       } finally {
         await root.end({ timeout: 5 });
       }
-      const { file } = await backupAt(project, PGLITE, H, join(dir, "pglite.backup"));
+      const { file, source } = await backupAt(project, PGLITE, H, join(dir, "pglite.backup"));
       const backend = { kind: "postgres" } as BackupBackend;
 
       const plain = await databaseAs("plain_login");
@@ -97,7 +96,7 @@ describe("a restore by a login that is not a superuser", () => {
       const restored = await restoreRun(project, file, writeTickerConfig(project, { database: target.setting }), chain(40n));
       expect(restored.stderr).toBe("");
       expect(restored.code).toBe(EXIT.ok);
-      expect(await hashOf(target)).toBe(manifestOf(file).contentsHash);
+      expect(await hashOf(target)).toBe(await hashOf(source));
 
       const reference = await databaseAs("restorer");
       const ticker = await startTicker(writeTickerConfig(project, { database: reference.setting, stop: Number(H) }), H + 5n);

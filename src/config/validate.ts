@@ -22,7 +22,8 @@
  * by its position, id and start, which together identify it.
  *
  * The shape:
- * - the default export is `{ entries }` and nothing else;
+ * - the default export is `{ entries, history? }` and nothing else; `history` names a recorded history file
+ *   (`./recorded-history.ts`);
  * - each entry is `{ id, start, stop?, version, config }` with no other property (the builders pass a property they do
  *   not know through, `./entries.ts`, so it is refused here);
  * - its id is `core` or a module of the build of the process's side, never a backbone part, which runs with the core. A
@@ -479,17 +480,22 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
         ];
       }
       const findings = Object.keys(data)
-        .filter((key) => key !== "entries")
+        .filter((key) => key !== "entries" && key !== "history")
         .map((key) =>
           finding(
             "top-level",
             pathOf("", key),
             null,
             null,
-            `the configuration has the property ${key}, where a configuration is { entries: [ … ] } and nothing else; ` +
-              "remove it",
+            `the configuration has the property ${key}, where a configuration is { entries: [ … ], history? } and nothing ` +
+              "else; remove it",
           ),
         );
+      if (data.history !== undefined && (typeof data.history !== "string" || data.history === "")) {
+        findings.push(
+          finding("top-level", "history", null, null, `the configuration's history is ${described(data.history)}, where it is a file path`),
+        );
+      }
       if (!Array.isArray(data.entries)) {
         findings.push(
           finding(

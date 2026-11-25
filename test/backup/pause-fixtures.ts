@@ -315,14 +315,12 @@ export async function stopEndsWhilePaused(run: Pausable, paused: Promise<void>, 
 export interface BackupOnSignal {
   /** The height the loop paused at, and the backup's. */
   readonly height: bigint;
-  /** The contents hash the log line names. */
-  readonly contentsHash: string;
 }
 
 /**
  * "SIGUSR2 writes a backup at its next pause" in `run`'s timeline, for the file `out`: the signal's line, then
  * the loop paused between heights (`backup on signal: processing paused at height h`, the last point before it h's
- * `on-after-db-write`), then the backup of h written (`backup on signal written to <out>: height h, …`) with no point
+ * `on-after-db-write`), then the backup of h written (`backup on signal written to <out>: height h`) with no point
  * run in between; with `goesOn`, the next height's `on-fetch` the first point after it.
  */
 export function backupAtPause(run: Pausable, out: string, goesOnAfter = true): BackupOnSignal {
@@ -334,12 +332,12 @@ export function backupAtPause(run: Pausable, out: string, goesOnAfter = true): B
   expect(paused, "the pause's log line").toBeGreaterThan(asked);
   const height = BigInt((entries[paused] as string).slice(pausedPrefix.length));
   expect(heightPoints(entries.slice(0, paused).filter(isPoint)).at(-1)).toBe(`on-after-db-write@${height}`);
-  const writtenPrefix = `log: backup on signal written to ${out}: height ${height}, contents hash `;
-  const written = entries.findIndex((entry, index) => index > paused && entry.startsWith(writtenPrefix));
+  const writtenLine = `log: backup on signal written to ${out}: height ${height}`;
+  const written = entries.findIndex((entry, index) => index > paused && entry === writtenLine);
   expect(written, `the backup of height ${height} written: ${JSON.stringify(entries.slice(paused).filter((e) => !isPoint(e)))}`).toBeGreaterThan(paused);
   expect(entries.slice(paused + 1, written).filter(isPoint), "points run while the backup was written").toEqual([]);
   if (goesOnAfter) expect(heightPoints(entries.slice(written + 1).filter(isPoint))[0]).toBe(`on-fetch@${height + 1n}`);
-  return { height, contentsHash: (entries[written] as string).slice(writtenPrefix.length) };
+  return { height };
 }
 
 /** The contents hash of a new process of the pause tests' build stopped at `height` on `backend` without a pause. */

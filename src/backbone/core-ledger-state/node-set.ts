@@ -18,8 +18,8 @@
  *   (`queue`). They are derived from the rows' forms, so they are checked, not compared.
  *
  * A check that fails, or a row whose key is not its content's, fails the computation with `ledger-refcount-invalid`,
- * reason `tables-inconsistent`, naming the check and the first such key in byte order: a backup is not written, a
- * restore rolls back, the exported `contentsHash` rejects.
+ * reason `tables-inconsistent`, naming the check and the first such key in byte order: the exported `contentsHash`
+ * rejects.
  *
  * The keys are held in `./key-collections.ts`' sharded sets and maps, and the node set is given as a row stream, so the
  * content of a whole chain's ledger state (more node keys than one JavaScript `Set` holds) can be computed.

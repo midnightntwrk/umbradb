@@ -257,7 +257,13 @@ const CONFIGURATION: CheckStep = {
     const { declarations } = state;
     state.secrets.push(...configSecrets({ config: state.loaded, declarations, side }));
     try {
-      const resolved = resolveConfig({ data: state.loaded.data, file: state.loaded.file, declarations, side });
+      const resolved = resolveConfig({
+        data: state.loaded.data,
+        file: state.loaded.file,
+        declarations,
+        side,
+        history: state.loaded.history,
+      });
       state.checked = resolved.checked;
       state.process = resolved.core;
       if (resolved.lowered !== null) {

@@ -199,7 +199,7 @@ export async function restorePrivate(
 }
 
 /**
- * The contents hash of a private database as `0x` hex, as its process and its backup's manifest compute it: no table of
+ * The contents hash of a private database as `0x` hex, as its process computes it: no table of
  * `pm` is declared `deterministic: false`; the private backbone's `core_private_source.accepted_config` is.
  */
 export async function privateHashOf(db: BackupDatabase): Promise<string> {
@@ -238,6 +238,8 @@ export interface PrivateBackup {
   readonly bound: PublicSide;
   readonly file: string;
   readonly manifest: Manifest;
+  /** The source's contents hash at the backup's height ({@link privateHashOf}). */
+  readonly hash: string;
 }
 
 /**
@@ -251,13 +253,15 @@ export async function privateBackup(project: CliProject, backend: BackupBackend,
     const db = await backend.database();
     const config = writePrivateConfig(project, { database: db.setting, start: PRIVATE_START, public: bound.setting });
     const running = await startPrivateFile(config);
+    let manifest: Manifest;
     try {
       await running.reach(BACKUP_HEIGHT);
-      const { manifest } = await running.handle.backup(file);
-      return { bound, file, manifest };
+      ({ manifest } = await running.handle.backup(file));
     } finally {
       await running.handle.stop();
     }
+    // The public head holds the source at the backup's height.
+    return { bound, file, manifest, hash: await privateHashOf(db) };
   } catch (error) {
     await bound.core.stop();
     throw error;

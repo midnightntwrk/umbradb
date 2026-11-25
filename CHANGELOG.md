@@ -11,6 +11,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 - Binary routes (`defineBinaryRoute`, `api.binaryRoute`): API endpoints that serve all or part of a file, with byte
   ranges, `ETag`/`If-Match` and a per-route answer size limit.
+- Recorded history files: a configuration's `history: "<file>"` supplies every revision the database ran up to the
+  file's height, so the configuration lists only what it runs now. `umbradb restore` writes the backup's history there
+  once it commits, refusing with `backup-history-mismatch` when the file holds another history unless given
+  `--overwrite-history`; `umbradb history export` writes the database's own. The configuration's entries continue the
+  recorded revisions when unchanged, and otherwise start at the height after the file's; a recorded module it no
+  longer lists stops at that height. A module's stop may now be added at the cursor.
+
 - Routes for a module's API (`src/modules/route.ts`): `defineRoute({ name, input, output, http?, handle })` declares
   one operation with zod schemas and no transport, and `api.route(route)` registers it from `on-start-api`. The core
   keeps every route with its schemas as JSON Schema and serves it over HTTP under `/<module-id>` (`POST
@@ -69,6 +76,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   - The calls made together go to the node as one JSON-RPC batch frame (up to `nodeBatchBlocks` blocks' calls). A node
     that refuses a batch, or answers none of it, gets single calls for the rest of that connection; the calls are sent
     again on their own (`node-unreachable`, reason `batch-refused`).
+- Backups no longer carry a contents hash, and restores no longer check one; `contents-hash-mismatch` is removed.
+  Computing it took most of a backup's time and a large part of a restore's. A restore still checks the manifest
+  against the chain and the configuration, and the ledger state root. A backup's manifest stays format 1, and a
+  `contentsHash` in an earlier build's backup is ignored. The backup and restore lines no longer print the hash, and
+  the browser page's records no longer hold it. The contents hash itself, its export and `/status` are unchanged.
 - Nothing is fetched above the core's `stop` or an upgrade boundary.
 - The tape node answers JSON-RPC batch frames (`batches: false` keeps the old −32600 refusal). The tape recorder still
   takes no batches: record with `nodeBatchBlocks: 1`.
@@ -76,6 +88,15 @@ adheres to [Semantic Versioning](https://semver.org/).
   `errors`, `run-reclaim`) are removed; those files count toward their directory's floor.
 
 ### Fixed
+
+- The ledger worker's memory no longer grows for as long as a sync runs, until a package aborts at the 4 GiB a 32-bit
+  package can address (Mainnet from genesis, at block 2,947,480). The worker held one ledger state from block to block,
+  so every node a block loaded stayed loaded; it now frees that state and loads it again from its key every 1,000
+  blocks. Over 14,808 Mainnet blocks from 3,581,192 its memory levelled off at 1.1 GiB, where it reached 2.3 GiB and
+  still grew before. The vendored packages also no longer keep a dead cache entry for each node key they hand out
+  (`hold_as_node` in patch `0003-ledger-wasm-node-store-exports`). The four packages are recorded again, so the core
+  version changes: a database an earlier build synced continues as an upgrade, its `core` revision kept as a
+  `versionEntry`.
 
 - A backup or restore of a database whose ledger state holds more than 2^24 node keys (stored and embedded; Preprod
   at height 3.5 million) no longer fails with `RangeError: Set maximum size exceeded`: the contents hash of

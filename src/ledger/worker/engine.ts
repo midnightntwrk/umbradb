@@ -36,7 +36,9 @@
  * pending and committed in the database since, before the engine's commit reached it), this is immediate. Otherwise
  * the state is read through the node store from its key, as after a restart, and the pending block is dropped.
  * `core-ledger-state` asks for the state at h − 1 before every apply. So a restarted process, with a fresh worker
- * that holds nothing, loads the state at the cursor once, and a process that keeps running reads nothing.
+ * that holds nothing, loads the state at the cursor once, and a process that keeps running reads nothing, except that
+ * every {@link RELOAD_EVERY} blocks the committed state is freed and loaded again from its key, so that the nodes
+ * blocks loaded into it do not pile up.
  *
  * **The v8 → v9 conversion.** A block of ledger v9 (`v9`, or `v9-rc5` for runtime 2.1.0) on a committed v8 state is
  * the first block F built by a v9 runtime after v8 blocks. The engine first converts the state with that v9 package's
@@ -274,7 +276,15 @@ export interface EngineOptions {
   readonly checkPlainData?: boolean;
   /** How many contracts' zswap state keys are kept at most: {@link ZSWAP_KEYS_KEPT} (a test's bound; 0 keeps none). */
   readonly zswapKeysKept?: number;
+  /** Blocks committed on a held state before it is reloaded from its key: {@link RELOAD_EVERY}; 0, never. */
+  readonly reloadEvery?: number;
 }
+
+/**
+ * Blocks committed on a held state before {@link LedgerEngine.load} reloads it from its key. A held state keeps every
+ * node a block loaded while it still reaches it, so its memory only grows; a reloaded state starts lazy again.
+ */
+export const RELOAD_EVERY = 1_000;
 
 /**
  * How many contracts' zswap state keys the engine keeps at most (`#zswapKey`). Above it the least recently used is
@@ -365,6 +375,9 @@ export class LedgerEngine {
   readonly #zswapKeysKept: number;
   #committed: Held | null = null;
   #pending: (Held & { readonly result: AppliedState }) | null = null;
+  readonly #reloadEvery: number;
+  /** Blocks committed since the committed state was last loaded from its key. */
+  #sinceLoad = 0;
 
   constructor(options: EngineOptions) {
     this.#load = options.load;
@@ -374,6 +387,9 @@ export class LedgerEngine {
     const kept = options.zswapKeysKept ?? ZSWAP_KEYS_KEPT;
     if (!Number.isSafeInteger(kept) || kept < 0) throw new RangeError(`the ledger engine keeps a whole number of zswap state keys, not ${kept}`);
     this.#zswapKeysKept = kept;
+    const every = options.reloadEvery ?? RELOAD_EVERY;
+    if (!Number.isSafeInteger(every) || every < 0) throw new RangeError(`the ledger engine reloads its state every whole number of blocks, not ${every}`);
+    this.#reloadEvery = every;
   }
 
   /** `value` as it leaves the worker, checked as plain data (see {@link EngineOptions.checkPlainData}); throws `fail`'s. */
@@ -701,6 +717,7 @@ export class LedgerEngine {
       root: pending.root,
     };
     this.#pending = null;
+    this.#sinceLoad += 1;
     return true;
   }
 
@@ -735,7 +752,11 @@ export class LedgerEngine {
     const holds = (held: Held | null): boolean =>
       held !== null && same(held, input) && held.ledger === input.ledger && sameBytes(held.key, input.stateKey);
     const { committed: before, pending } = { committed: this.#committed, pending: this.#pending };
-    if (before !== null && holds(before)) return { stateRoot: before.root, loaded: false };
+    if (before !== null && holds(before)) {
+      // Only with nothing pending: a pending block applied again must get its kept batch back.
+      const due = this.#store !== undefined && pending === null && this.#reloadEvery > 0 && this.#sinceLoad >= this.#reloadEvery;
+      return due ? this.#reload(before) : { stateRoot: before.root, loaded: false };
+    }
     if (pending !== null && holds(pending)) {
       this.commit(input);
       return { stateRoot: pending.root, loaded: false };
@@ -750,6 +771,22 @@ export class LedgerEngine {
     if (this.#committed !== null) this.#committed.adapter.dispose(this.#committed.state);
     const root = adapter.stateRoot(state);
     this.#committed = { ...idOf(input), ledger: input.ledger, adapter, state, key: input.stateKey, root };
+    this.#sinceLoad = 0;
+    return { stateRoot: root, loaded: true };
+  }
+
+  /** The committed state `held` freed and loaded again from its key, lazy, so the nodes blocks loaded into it are freed. */
+  #reload(held: Held): LoadedState {
+    const store = this.#storeFor("reload the state");
+    // Zswap keys built from it hold its nodes too.
+    this.#forgetZswapKeys();
+    // Freed before the load: while it lives, the new state's nodes resolve to its loaded ones through `sp_cache`.
+    this.#committed = null;
+    held.adapter.dispose(held.state);
+    const state = held.adapter.load(held.key, store);
+    const root = held.adapter.stateRoot(state);
+    this.#committed = { ...held, state, root };
+    this.#sinceLoad = 0;
     return { stateRoot: root, loaded: true };
   }
 

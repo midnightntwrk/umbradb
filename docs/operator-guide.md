@@ -318,7 +318,7 @@ umbradb backup --out indexer-1774000.backup [--config umbradb.config.ts]
 The command reads the configuration file — `--config`, or `umbradb.config.ts` in the working directory, as `umbradb
 run` does — for the database, the side (core or private) and the development opt-in, and writes the file once the
 backup is complete: a failed or interrupted backup leaves no file at that path, and an earlier file there is kept. It
-prints the file, the height, the contents hash and the tool, and exits 0; it exits 1 when refused, and 2 on a wrong
+prints the file, the height and the tool, and exits 0; it exits 1 when refused, and 2 on a wrong
 argument.
 
 - **On PostgreSQL** it runs the PostgreSQL 18 client's `pg_dump`, in the snapshot of a read that also reads the
@@ -353,7 +353,7 @@ height, and goes on from the next one. This is how to back up a running PGlite i
 on PostgreSQL. At startup the process logs `SIGUSR2 writes a backup to <path> at the loop's next pause
 (backupOnSignal)`; for each signal it logs what it did:
 
-- `backup on signal written to <path>: height <h>, contents hash <hash>`;
+- `backup on signal written to <path>: height <h>`;
 - `backup on signal: <path> holds a backup of height <h> already, so none was written` — nothing committed since that
   backup;
 - `backup on signal failed (<code>): …` — the file at the path is not an UmbraDB backup and is left as it is
@@ -401,10 +401,10 @@ umbradb restore indexer-1774000.backup [--config umbradb.config.ts]
 **Restore only backups from a source you trust — your own.** A restore runs the file's SQL with the database login's
 rights: a file that was changed, or written by someone else, can create functions, triggers or views, change any
 table, and on a server whose login is a superuser do more than that, before any check after loading can refuse it
-. The manifest's checks and the contents hash catch a backup that is damaged or from another
-chain; they do not make a hostile file safe to run. UmbraDB keeps it that way on purpose — a restore runs the file's
-SQL with the writer's rights before its checks after loading, so restore only backups you wrote (the
-threat model's [Backups and restore](THREAT_MODEL.md#backups-and-restore)).
+. The manifest's checks catch a backup from another chain or configuration, and the ledger root one whose
+ledger state is not the node's; they do not make a hostile file safe to run. UmbraDB keeps it that way on purpose —
+a restore runs the file's SQL with the writer's rights before its checks after loading, so restore only backups you
+wrote (the threat model's [Backups and restore](THREAT_MODEL.md#backups-and-restore)).
 
 The command restores into the configuration file's database, which must be empty — a new PostgreSQL database, or a
 PGlite directory with no database in it (the command creates it, with any missing parent directory, once the checks
@@ -421,10 +421,9 @@ configuration's node to check the chain. It refuses, and leaves the target as it
 | `backup-build-mismatch` | the build lacks the version of an entry at the backup's height + 1, or a migration the backup applied |
 | `backup-genesis-mismatch` | the node serves another chain |
 | `backup-block-not-finalized` | the node has not finalized the backup's block, or finalized another one at its height |
-| `contents-hash-mismatch` | the restored data is not what the backup's manifest says (checked before the commit) |
 | `backup-root-mismatch` | with `core-ledger-state`, the stored ledger state root at the backup's height is not the node's |
 
-The first six are checked before anything is loaded; the last two after loading, inside the restore's one transaction,
+The first six are checked before anything is loaded; the last one after loading, inside the restore's one transaction,
 which then rolls back. A restore interrupted halfway — a crash, a kill — leaves the target empty, and can be run again.
 The restored database gets UmbraDB's module roles (created on the server if missing: the login needs `CREATEROLE`, as
 for a first start) and the owners and grants a database built by migrations has. Start the indexer on it with the same

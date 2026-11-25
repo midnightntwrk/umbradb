@@ -456,10 +456,10 @@ export async function signalRun(project: CliProject, db: ProcessDatabase, out: s
     );
     release?.();
     await read;
-    const written = `backup on signal written to ${out}: height 10, contents hash `;
+    const written = `backup on signal written to ${out}: height 10`;
     await until(
       run,
-      () => run.lines.some((line) => line.startsWith(written) || line.startsWith("backup on signal failed")),
+      () => run.lines.some((line) => line === written || line.startsWith("backup on signal failed")),
       "the backup written",
     );
     const failed = run.lines.find((line) => line.startsWith("backup on signal failed"));

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/command.js";
 import { type CliProject, cliProject } from "../cli/cli-fixtures.js";
-import { BACKUP_BACKENDS, type BackupBackend, hashOf, killedRestore, manifestOf, tickerModule } from "./backup-fixtures.js";
+import { BACKUP_BACKENDS, type BackupBackend, hashOf, killedRestore, tickerModule } from "./backup-fixtures.js";
 import { backupAt, chain, emptied, restoreRun, restoreTarget } from "./restore-fixtures.js";
 
 /**
@@ -41,7 +41,7 @@ describe.each(BACKUP_BACKENDS)("a restore killed while loading on $name", (backe
   it(
     "a restore killed while running the file's SQL leaves the target empty, and a new restore into it then succeeds",
     async () => {
-      const { file } = await backupAt(project, backend, H, join(dir, `${backend.kind}.backup`));
+      const { file, source } = await backupAt(project, backend, H, join(dir, `${backend.kind}.backup`));
       const { db, config } = await restoreTarget(project, backend);
       const killed = await killedRestore({ file, config, cwd: project.dir, head: Number(HEAD), killAt: 20 });
       expect(killed.signal).toBe("SIGKILL");
@@ -50,7 +50,7 @@ describe.each(BACKUP_BACKENDS)("a restore killed while loading on $name", (backe
       const again = await restoreRun(project, file, config, chain(HEAD));
       expect(again.stderr).toBe("");
       expect(again.code).toBe(EXIT.ok);
-      expect(await hashOf(db)).toBe(manifestOf(file).contentsHash);
+      expect(await hashOf(db)).toBe(await hashOf(source));
     },
     TEST_TIMEOUT_MS,
   );
