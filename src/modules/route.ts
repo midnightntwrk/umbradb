@@ -139,6 +139,8 @@ export interface BinaryRoute<I extends z.ZodType = z.ZodType> {
   readonly description?: string;
   readonly input: I;
   readonly http?: RouteHttp & { readonly method: "GET" };
+  /** The media type its files have, for the API's description (`image/png`); not checked against an answer's. */
+  readonly contentType?: string;
   /** The most bytes one answer carries; a request for more is refused, so a client asks for ranges. 1 MiB by default. */
   readonly maxAnswerBytes?: number;
   readonly handle: (input: z.output<I>, context: RouteContext) => Promise<BinaryFile>;

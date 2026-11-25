@@ -67,6 +67,16 @@ describe("api.binaryRoute: registration", () => {
     });
   });
 
+  it("keeps a declared contentType in the catalog, and refuses one that is no media type", () => {
+    const ok = { name: "blob", input: z.object({}), handle: async () => binaryData(BYTES, "a/b") };
+    const { routes } = apiOf((registry) => registry.binaryRoute({ ...ok, contentType: "image/png" }));
+    expect(routes.routes[0]?.contentType).toBe("image/png");
+    for (const contentType of ["", "png", "image/png\n", 5]) {
+      expect(() => apiOf((registry) => registry.binaryRoute({ ...ok, contentType } as never))).toThrow(/m registered the route blob, whose contentType is not a media type/);
+    }
+    expect(() => apiOf((registry) => registry.binaryRoute({ ...ok, contentType: "text/plain; charset=utf-8" }))).not.toThrow();
+  });
+
   it("refuses a POST, an input that declares range or ifMatch and a maxAnswerBytes that is no positive integer", () => {
     const refused = (route: BinaryRoute) => () => apiOf((registry) => registry.binaryRoute(route));
     const ok = { name: "blob", input: z.object({}), handle: async () => binaryData(BYTES, "a/b") };

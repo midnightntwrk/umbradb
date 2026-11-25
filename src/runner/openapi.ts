@@ -107,12 +107,13 @@ function operationOf(entry: RouteEntry, schemas: Json): Json {
   }
 
   if (entry.kind === "binary") {
+    const content = { [entry.contentType ?? "*/*"]: {} };
     operation.responses = {
-      "200": { description: "The whole file.", headers: { ...CHAIN_HEADERS, ETag: { schema: { type: "string" } } }, content: { "*/*": {} } },
+      "200": { description: "The whole file.", headers: { ...CHAIN_HEADERS, ETag: { schema: { type: "string" } } }, content },
       "206": {
         description: "The byte range asked for.",
         headers: { ...CHAIN_HEADERS, ETag: { schema: { type: "string" } }, "Content-Range": { schema: { type: "string" } } },
-        content: { "*/*": {} },
+        content,
       },
       default: ERROR_RESPONSE,
     };

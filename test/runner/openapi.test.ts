@@ -99,10 +99,23 @@ describe("GET /openapi.json", () => {
     expect(schemas.maybe.anyOf).toHaveLength(2);
   });
 
-  it("gives a binary route its byte range parameter and a partial answer", async () => {
+  it("gives a binary route its range and ifMatch parameters, naming their headers, and a partial answer of any type", async () => {
     const blob = (await documentOf(apiOf(routesOf))).paths["/m/blob"].get;
-    expect(blob.parameters.map((p: { name: string }) => p.name)).toContain("range");
+    const parameters = blob.parameters.map((p: { name: string; in: string; description: string }) => [p.name, p.in, p.description.includes("header instead")]);
+    expect(parameters).toEqual([
+      ["range", "query", true],
+      ["ifMatch", "query", true],
+    ]);
     expect(Object.keys(blob.responses)).toEqual(expect.arrayContaining(["200", "206"]));
+    expect(Object.keys(blob.responses["200"].content)).toEqual(["*/*"]);
+  });
+
+  it("gives a binary route's declared contentType as its answers' media type", async () => {
+    const api = apiOf((registry) =>
+      registry.binaryRoute(defineBinaryRoute({ name: "png", input: z.object({}), contentType: "image/png", handle: async () => binaryData(new Uint8Array(1), "image/png") })),
+    );
+    const png = (await documentOf(api)).paths["/m/png"].get;
+    expect([Object.keys(png.responses["200"].content), Object.keys(png.responses["206"].content)]).toEqual([["image/png"], ["image/png"]]);
   });
 
   it("answers without reading the database", async () => {

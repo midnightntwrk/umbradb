@@ -71,6 +71,8 @@ export interface RouteEntry {
   readonly http: RouteHttp;
   /** `binary` for a binary route, whose answer is bytes (`./route-binary.ts`). */
   readonly kind: "json" | "binary";
+  /** A binary route's declared media type, if it gives one. */
+  readonly contentType?: string;
   /** The declaration itself. */
   readonly route: AnyRoute | AnyBinaryRoute;
 }

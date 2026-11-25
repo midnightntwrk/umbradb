@@ -609,7 +609,7 @@ counts and queue (after a restart, for one).
     chain-data headers (`X-Umbra-View`, `X-Umbra-Height`, `X-Umbra-Hash`) and headers that keep a browser from running
     them. UmbraDB's own errors (404, 405, a body that is not JSON, 500, 504) carry neither.
 
-- **Binary routes**, for a file's bytes. `defineBinaryRoute({ name, input, http?, maxAnswerBytes?, handle })` is a route whose handler
+- **Binary routes**, for a file's bytes. `defineBinaryRoute({ name, input, http?, contentType?, maxAnswerBytes?, handle })` is a route whose handler
   returns a `BinaryFile`, registered with `api.binaryRoute(route)`. It is always a `GET` (`GET /<your-module-id>/<name>`
   without `http`), and its input, errors and height are a route's.
 
@@ -634,6 +634,9 @@ counts and queue (after a restart, for one).
   - **Ranges.** A client asks for part of the file with the `Range` header or the `range` parameter, not both, in the
     header's form: `0-499`, `500-`, `-500` (the last 500 bytes). One range is answered 206 with `Content-Range`;
     several are answered whole; one past the end is 416 `range-not-satisfiable`.
+  - **`contentType`** (optional) is the media type the route's files have (`image/png`), shown in the API's
+    documentation; without it the documentation says any type. It describes the route and is not checked: each answer
+    is sent with its `BinaryFile`'s own `contentType`.
   - **`maxAnswerBytes`** (1 MiB by default) caps one answer. A request for more, whole file or range, is refused 429
     `answer-too-large`, so clients read a large file in ranges.
   - **`etag`** is sent as the `ETag`: give one that changes whenever the bytes do (a content hash). A request whose
