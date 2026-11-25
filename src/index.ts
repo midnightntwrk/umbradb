@@ -9,7 +9,7 @@
  * - **A module**: {@link defineModule} and its types, the points ({@link POINTS}), the handles, the cursor-table and
  *   height-versioned-table helpers, the canonical encodings and the contents hash (with the content-defined tables of
  *   UmbraDB's own declarations), routes ({@link defineRoute}, registered with `api.route`), their page cursors and
- *   `bigint` schemas, the module API's envelope helpers for a raw HTTP handler, `hexBytes` for a settings schema, and
+ *   `bigint` schemas, topics ({@link defineTopic}, emitted to from `on-db-write`), the module API's envelope helpers for a raw HTTP handler, `hexBytes` for a settings schema, and
  *   `retainedStatesOf`.
  * - **Public modules**: {@link TOKEN_METADATA}, MIP-0018 token metadata in its tables, and the errors its refused
  *   starts carry ({@link TokenMetadataStartAfterDatabase}, {@link TokenMetadataRevisionGap}); {@link TOKEN_METADATA_API},
@@ -99,6 +99,7 @@ export {
   RouteError,
   type RouteErrorKind,
 } from "./modules/route.js";
+export { defineTopic, type Topic, type TopicSink } from "./modules/topic.js";
 export type { BlockRef } from "./runner/block-source.js";
 export { answerChainData, chainDataHeaders, readChainDataView, withViewExtensions } from "./runner/envelope.js";
 export { InMemoryBlockSource } from "./runner/in-memory-source.js";

@@ -395,8 +395,9 @@ and exits 1 at once, without opening the admin listener.
 
 ## Module API and its headers
 
-The module API listens on `listen.api` (none unless set): HTTP, and WebSocket subscriptions on the same port. Its
-routes and subscriptions are the modules' own, registered in their `on-start-api`; UmbraDB adds none. A request reads
+The module API listens on `listen.api` (none unless set): HTTP, and WebSocket subscriptions to topics on the same
+port. Its routes and topics are the modules' own (routes registered in `on-start-api`, topics declared and emitted to
+from `on-db-write`); UmbraDB adds none. A request reads
 the latest committed height.
 
 Headers UmbraDB adds to every answer:
@@ -427,14 +428,17 @@ UmbraDB's own errors are `{ "error": { "code", "message" } }`: 400 `invalid-requ
 `method-not-allowed`, 413 `request-too-large` (over 1 MiB), 500 `internal-error` (a handler that threw), 503
 `no-committed-height` (before the first block commits), 504 `query-timeout`.
 
-Subscriptions are JSON messages over WebSocket, on any path:
+Subscriptions are JSON messages over WebSocket, on any path. Once subscribed, a connection gets one frame per committed
+height, starting after the height the acknowledgement names, with every module's messages for its topics (none in an
+empty one; `"topics":[]` follows the heights alone), until an unsubscribe leaves it no topic. It is live only: a client
+that misses heights reads routes to catch up.
 
 ```text
-→ {"type":"subscribe","id":"s1","name":"stats-module-blocks","args":{"minTx":0}}
-← {"type":"subscribed","id":"s1"}
-← {"type":"next","id":"s1","value":{"height":"252","hash":"0xd445…","tx_count":0,"failed_count":0,"total_tx":"59"}}
-→ {"type":"unsubscribe","id":"s1"}
-← {"type":"complete","id":"s1"}
+→ {"type":"subscribe","topics":["stats-module.blocks"]}
+← {"type":"subscribed","topics":["stats-module.blocks"],"height":"251"}
+← {"type":"height","height":"252","hash":"0xd445…","messages":[{"topic":"stats-module.blocks","value":{"height":"252","hash":"0xd445…","tx_count":0,"failed_count":0,"total_tx":"59"}}]}
+→ {"type":"unsubscribe","topics":["stats-module.blocks"]}
+← {"type":"unsubscribed","topics":[]}
 ```
 
 ## UmbraDB node architecture
@@ -503,7 +507,7 @@ The blocks table (`core_block_commit.blocks`) and the digests are always there. 
 ## Example: loading `stats-module`
 
 `stats-module` stores one row per height (the block's hash, how many transactions it carried, how many failed, and a
-running total) and serves the rows over HTTP and a subscription. Its code is in
+running total) and serves the rows over HTTP, and publishes each new row to a topic. Its code is in
 [`examples/stats-module/`](examples/stats-module/), with `stats-module.ts`, `umbradb.config.ts`, `run.sh` and `try.sh`;
 the [module guide](docs/module-guide.md) walks through it. It imports from `"umbradb"`:
 

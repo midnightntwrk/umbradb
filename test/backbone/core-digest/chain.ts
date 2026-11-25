@@ -12,6 +12,7 @@ import {
   type ProcessContext,
 } from "../../../src/modules/declaration.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
+import { NO_TOPICS } from "../../helpers/topic-sink.js";
 
 /**
  * A chain for the digests' tests: the real `core-digest` declaration, a stand-in for `core-block-commit`, and the
@@ -148,7 +149,7 @@ export async function runBlock(chain: Chain): Promise<bigint> {
     for (const part of chain.writeOrder) {
       const write = part.points["on-db-write"];
       if (write === undefined) continue;
-      await writes.write(part.id, (w) => write.call(part.points, context, blockAt(h), w));
+      await writes.write(part.id, (w) => write.call(part.points, context, blockAt(h), w, NO_TOPICS));
     }
     for (const part of chain.writeOrder) {
       const settle = part.points["on-settle"];

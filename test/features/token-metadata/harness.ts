@@ -273,7 +273,6 @@ export async function tokensHandler(): Promise<ApiHandler> {
     },
     binaryRoute: () => undefined,
     http: () => undefined,
-    subscription: () => undefined,
   });
   const handler = handlers.get(TOKENS_PATH);
   if (handler === undefined) throw new Error(`token-metadata-api registered no route at ${TOKENS_PATH}`);

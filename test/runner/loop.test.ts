@@ -715,7 +715,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       if (write === undefined) return d;
       const points = {
         ...d.points,
-        async "on-db-write"(p: Parameters<typeof write>[0], b: BlockContext, w: BlockWriteHandle) {
+        async "on-db-write"(p: Parameters<typeof write>[0], b: BlockContext, w: BlockWriteHandle, t: Parameters<typeof write>[3]) {
           const counting: BlockWriteHandle = {
             height: w.height,
             query: (sql, params) => w.query(sql, params),
@@ -725,7 +725,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
               return n;
             },
           };
-          await write.call(d.points, p, b, counting);
+          await write.call(d.points, p, b, counting, t);
         },
       };
       return { ...d, points };

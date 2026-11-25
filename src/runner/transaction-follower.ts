@@ -45,3 +45,13 @@ export interface TransactionFollower {
    */
   rolledBack(block: FollowedBlock): void;
 }
+
+/** One follower telling each of `followers`, in order (the ledger worker's host, then the topic bus). */
+export function followAll(...followers: readonly (TransactionFollower | undefined)[]): TransactionFollower {
+  const all = followers.filter((follower) => follower !== undefined);
+  return Object.freeze({
+    written: (block: FollowedBlock) => all.forEach((follower) => follower.written(block)),
+    committed: (block: FollowedBlock) => all.forEach((follower) => follower.committed(block)),
+    rolledBack: (block: FollowedBlock) => all.forEach((follower) => follower.rolledBack(block)),
+  });
+}

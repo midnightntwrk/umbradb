@@ -73,7 +73,7 @@
  * with `connection-lost` (retryable, `cause` `writer-session-replaced`), and the height is made again, with
  * `continues` false. A session lost after the `COMMIT` makes the later `on-after-db-write` callbacks say false.
  *
- * **The transaction's follower** ({@link LoopInput.follower}: the process's ledger worker host, when it has one) is
+ * **The transaction's follower** ({@link LoopInput.follower}: the process's ledger worker host and topic bus) is
  * told what became of each block's transaction (`./transaction-follower.ts`): `written` once h's body ended (its
  * `on-db-write` and `on-settle` callbacks, and the cursor check accepted the cursor), `committed` wherever the loop
  * knows h committed (the `COMMIT`'s answer, the cursor read after a lost one, the re-delivery of the cursor's block at a
@@ -187,6 +187,7 @@ import {
 } from "./dispatch.js";
 import type { LoopPause } from "./pause.js";
 import type { TransactionFollower } from "./transaction-follower.js";
+import { TopicBus } from "./topic-bus.js";
 import { traceAdd, traceDropBlock, traceEndBlock } from "../trace/trace.js";
 import type { MisuseReports } from "./process-context.js";
 
@@ -232,9 +233,11 @@ export interface LoopInput {
   readonly pause?: LoopPause;
   /**
    * Told what became of each block's transaction (`./transaction-follower.ts`; see the module comment): the process's
-   * ledger worker host, when it has one. None unless given.
+   * ledger worker host, when it has one, and its topic bus. None unless given.
    */
   readonly follower?: TransactionFollower;
+  /** Where `on-db-write` emits to topics; the process also makes it a follower, to send each height on its commit. */
+  readonly topics?: TopicBus;
 }
 
 /** The lockstep wait (`src/private/lockstep.ts`'s `Lockstep`): before `BEGIN` of `height`. */
@@ -537,6 +540,11 @@ export class FinalizedLoop {
    * of the range declares the point, so its blocks skip it.
    */
   readonly #settleSchedules = new WeakMap<ResolvedRange, PointSchedule<"on-settle"> | null>();
+  /** Without the process's bus, emits are checked and dropped: nothing follows the commits. */
+  readonly #ownTopics = new TopicBus();
+  get #topics(): TopicBus {
+    return this.input.topics ?? this.#ownTopics;
+  }
   /** The block whose `COMMIT` answered last in this run of the loop; null from the run's start until one does. */
   #lastCommitted: BlockRef | null = null;
   /** The writer's session that block's transaction ran on (`Database.writerSession`). */
@@ -876,7 +884,11 @@ export class FinalizedLoop {
     });
     await this.#dispatch(run.range, "on-db-write", (part, call) => {
       const context = this.#context(run, part, run.items.visible(), this.continues(run));
-      return writes.write(part.id, (w) => call(context, w));
+      return writes.write(part.id, (w) =>
+        this.#topics.collect(part, run.height, (topics) => call(context, w, topics), (error, module) =>
+          this.#misused({ error, module, point: "on-db-write" }),
+        ),
+      );
     });
     if (this.#settleScheduleOf(run.range) !== null) await this.settlePoint(run, writes);
     await writes.end();

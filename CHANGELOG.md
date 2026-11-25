@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking changes
+
+- Module subscriptions are replaced by topics: modules declare `topics` and emit to them from `on-db-write`
+  (`api.subscription` is removed), and subscribers get one frame per committed height. The WebSocket protocol changed
+  to match (module guide §7, A.5).
+
 ### Added
 
 - Binary routes (`defineBinaryRoute`, `api.binaryRoute`): API endpoints that serve all or part of a file, with byte

@@ -138,7 +138,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (bac
 
   it("starting, its configuration validated (on-start-db held): /status names the core, /config shows it; ready 503; the module API 503", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set(), startDb: gate() };
+    const hooks: MapiHooks = { startDb: gate() };
     const m = mapiModule(hooks);
     const handle = startUmbraDB({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 2n }) });
     const host = await mountHandlers(handle);
@@ -165,7 +165,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (bac
     const first = gate();
     const tenth = gate();
     // Held before each height's reads and transaction, so the module API's reads go on (on PGlite's one session too).
-    const hooks: MapiHooks = { emits: new Set(), parses: new Map([[1n, first], [10n, tenth]]) };
+    const hooks: MapiHooks = { parses: new Map([[1n, first], [10n, tenth]]) };
     const m = mapiModule(hooks);
     const handle = startUmbraDB({
       config: { data: libraryData(db.setting, [m], { readinessLag: 5 }) },
@@ -191,14 +191,19 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (bac
       expect(stateProblems(await listeningObservation(adminOf(handle)), { state: "syncing", ready: false })).toEqual([]);
       const rows = await exchange(host.origin, "GET", "/rows");
       expect([rows.status, JSON.parse(rows.text)]).toEqual([200, { height: "9", rows: 9 }]);
-      // A subscription through the mounted upgrade gets the heights the module emits from on-after-db-write.
+      // A subscription through the mounted upgrade gets a frame per height from the committed one on.
       const client = await Client.connect(host.ws);
-      client.send({ type: "subscribe", id: "s", name: "feed" });
-      expect(await client.until(1)).toEqual([{ type: "subscribed", id: "s" }]);
+      client.send({ type: "subscribe", topics: ["mapi.feed"] });
+      expect(await client.until(1)).toEqual([{ type: "subscribed", topics: ["mapi.feed"], height: "9" }]);
       tenth.open();
       await cursorReaches(handle, 40n);
       await eventually(() => handle.status().state === "following", "following at the head");
-      expect((await client.until(2))[1]).toEqual({ type: "next", id: "s", value: { height: "10" } });
+      expect((await client.until(2))[1]).toEqual({
+        type: "height",
+        height: "10",
+        hash: expect.stringMatching(/^0x[0-9a-f]+$/),
+        messages: [{ topic: "mapi.feed", value: { height: "10" } }],
+      });
       expect(stateProblems(await mountedObservation(host), { state: "following", ready: true })).toEqual([]);
       // The listening admin answers from the snapshot published to its thread, at the latest at the next heartbeat.
       await statusWhen(adminOf(handle), (body) => body.state === "following");
@@ -214,7 +219,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (bac
 
   it("stopped at an upgrade boundary serves reads; stop() turns the mounted module API to 503 stopping, closes its subscriptions and the listener", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set() };
+    const hooks: MapiHooks = {};
     const m = mapiModule(hooks);
     const data = {
       entries: [
@@ -238,7 +243,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (bac
         expect([rows.status, JSON.parse(rows.text)]).toEqual([200, { height: "5", rows: 5 }]);
       }
       const client = await Client.connect(host.ws);
-      client.send({ type: "subscribe", id: "s", name: "feed" });
+      client.send({ type: "subscribe", topics: ["mapi.feed"] });
       await client.until(1);
       const stopping = handle.stop();
       // The stop has begun: /status says so, mounted.
@@ -260,7 +265,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (bac
 
   it("halted: live 200, ready 503, /status with the reason; reads answer at the cursor until stop()", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set(), haltAt: 4n, failure: "mapi breaks at 4" };
+    const hooks: MapiHooks = { haltAt: 4n, failure: "mapi breaks at 4" };
     const m = mapiModule(hooks);
     const handle = startUmbraDB({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 8n }) });
     const host = await mountHandlers(handle);
@@ -289,7 +294,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (bac
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => unhandled.push(reason);
     process.on("unhandledRejection", onUnhandled);
-    const m = mapiModule({ emits: new Set() });
+    const m = mapiModule({});
     // Every surface asked to listen, at ports of its own, so that "nothing opened" can fail: none may bind. On
     // PostgreSQL the link's reader login is written (never contacted), so the plan takes the request.
     const ports = { api: await freePort(), admin: await freePort(), privateLink: await freePort() };
@@ -399,8 +404,8 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (bac
   /** The cases on this backend: a failing on-start-db, the module API's port in use, the link's port in use. */
   async function classBCases(): Promise<readonly { readonly what: string; readonly options: UmbraDBOptions; readonly code: string; readonly check?: (error: UmbraError) => string[]; release?(): Promise<void> }[]> {
     const thrown = new Error("x");
-    const failing = mapiModule({ emits: new Set(), startDbFailure: thrown });
-    const plain = mapiModule({ emits: new Set() });
+    const failing = mapiModule({ startDbFailure: thrown });
+    const plain = mapiModule({});
     const apiPort = await heldPort();
     const linkPort = await heldPort();
     const linkDb = await backend.database();

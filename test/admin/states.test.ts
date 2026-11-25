@@ -61,8 +61,8 @@ function waiting(id: string, point: "on-db-write" | "on-start-db", wait: () => P
     ...base,
     points: {
       ...base.points,
-      async "on-db-write"(p, b, w) {
-        await (base.points["on-db-write"] as NonNullable<ModuleDeclaration["points"]["on-db-write"]>)(p, b, w);
+      async "on-db-write"(p, b, w, t) {
+        await (base.points["on-db-write"] as NonNullable<ModuleDeclaration["points"]["on-db-write"]>)(p, b, w, t);
         if (b.height === height) await wait();
       },
     },

@@ -52,7 +52,7 @@ export async function hashesOfSecrets(backend: ProcessBackend, before?: (variant
   const listener: (string | null)[] = [];
   for (const variant of variants) {
     before?.(variant);
-    const m = mapiModule({ emits: new Set() });
+    const m = mapiModule({});
     const options: UmbraDBOptions = {
       config: { data: libraryData(variant.database, [m], variant.extra) },
       modules: [m],

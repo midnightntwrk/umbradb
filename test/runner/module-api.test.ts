@@ -96,11 +96,10 @@ function thrown(body: () => unknown): unknown {
 const ok = async () => ({ status: 200, body: { ok: true } });
 
 describe("ApiRoutes: what modules register in on-start-api", () => {
-  it("collects each module's HTTP routes and subscriptions in registration order", () => {
+  it("collects each module's HTTP routes in registration order", () => {
     const routes = new ApiRoutes();
     const a = routes.open("a");
     a.registry.http("GET", "/blocks/:height", ok);
-    a.registry.subscription("heights", () => () => undefined);
     a.close();
     const b = routes.open("b");
     b.registry.http("POST", "/", ok);
@@ -110,7 +109,6 @@ describe("ApiRoutes: what modules register in on-start-api", () => {
       ["a", "GET", "/blocks/:height"],
       ["b", "POST", "/"],
     ]);
-    expect(routes.subscriptions.map(({ module, name }) => [module, name])).toEqual([["a", "heights"]]);
     expect(Object.isFrozen(routes.http)).toBe(true);
   });
 
@@ -131,9 +129,6 @@ describe("ApiRoutes: what modules register in on-start-api", () => {
       ["a parameter named twice", () => registry.http("GET", "/:a/:a", ok)],
       ["a path that is not a string", () => registry.http("GET", 7 as unknown as string, ok)],
       ["a handler that is not a function", () => registry.http("GET", "/x", "no" as unknown as typeof ok)],
-      ["an empty subscription name", () => registry.subscription("", () => () => undefined)],
-      ["a subscription name that is not a string", () => registry.subscription(1 as unknown as string, () => () => undefined)],
-      ["a subscription handler that is not a function", () => registry.subscription("s", null as unknown as () => () => void)],
     ];
     for (const [what, call] of bad) {
       const error = thrown(call);
@@ -142,7 +137,6 @@ describe("ApiRoutes: what modules register in on-start-api", () => {
       expect((error as Error).message, what).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
     }
     expect(routes.http).toHaveLength(0);
-    expect(routes.subscriptions).toHaveLength(0);
   });
 
   it("refuses a registration once the module's on-start-api has ended", () => {
@@ -151,10 +145,6 @@ describe("ApiRoutes: what modules register in on-start-api", () => {
     registration.close();
     expect(() => registration.registry.http("GET", "/x", ok)).toThrow(
       "m registered GET /x after its on-start-api callback ended: modules register their API once, at startup",
-    );
-    expect(() => registration.registry.subscription("s", () => () => undefined)).toThrow(
-      "m registered the subscription s after its on-start-api callback ended: modules register their API once, at " +
-        "startup",
     );
     expect(Object.isFrozen(registration.registry)).toBe(true);
   });
@@ -196,20 +186,7 @@ describe("ApiRoutes: what modules register in on-start-api", () => {
     });
   });
 
-  it("refuses a subscription name registered twice, and reports the first duplicate in registration order", () => {
-    const routes = new ApiRoutes();
-    for (const module of ["a", "b", "c"]) {
-      const registration = routes.open(module);
-      if (module !== "a") registration.registry.http("GET", "/x", ok);
-      registration.registry.subscription(module === "c" ? "other" : "heights", () => () => undefined);
-      registration.close();
-    }
-    const error = thrown(() => routes.check()) as UmbraError;
-    expect(error.details).toEqual({ kind: "subscription", route: "heights", modules: ["a", "b"] });
-    expect(error.message).toBe("a and b both register the subscription heights: a subscription name is registered once");
-  });
-
-  it("accepts routes that differ in method, in a literal against a parameter, and a path named like a subscription", () => {
+  it("accepts routes that differ in method, and in a literal against a parameter", () => {
     expect(() =>
       routesOf((api) => {
         api.http("GET", "/a", ok);
@@ -217,9 +194,6 @@ describe("ApiRoutes: what modules register in on-start-api", () => {
         api.http("GET", "/a/:x", ok);
         api.http("GET", "/a/b", ok);
         api.http("GET", "/heights", ok);
-        api.subscription("/heights", () => () => undefined);
-        api.subscription("heights", () => () => undefined);
-        api.subscription("GET /heights", () => () => undefined);
       }),
     ).not.toThrow();
   });
@@ -605,84 +579,6 @@ describe("ModuleApi.answer: one request, one bounded read, the module's answer",
   });
 });
 
-describe("ModuleApi.subscribe: subscriptions notified through emit", () => {
-  it("calls the module's handler with the arguments, sends what it emits, and unsubscribes once", () => {
-    const emits: ((value: unknown) => void)[] = [];
-    let unsubscribed = 0;
-    const routes = routesOf((api) =>
-      api.subscription("heights", (args, emit) => {
-        expect(args).toEqual({ from: 3 });
-        emits.push(emit);
-        return () => {
-          unsubscribed++;
-        };
-      }),
-    );
-    const sent: unknown[] = [];
-    const subscription = new ModuleApi(routes, fakeDb()).subscribe("heights", { from: 3 }, (value) => sent.push(value));
-    emits[0]?.(1n);
-    emits[0]?.({ h: 2n });
-    expect(sent).toEqual([1n, { h: 2n }]);
-    subscription();
-    subscription();
-    emits[0]?.(3n);
-    expect(unsubscribed).toBe(1);
-    expect(sent).toHaveLength(2);
-  });
-
-  it("refuses an unknown name (not-found) and a handler that throws or returns no unsubscribe (internal-error)", () => {
-    const boom = new Error("handler broke");
-    const errors: unknown[] = [];
-    let emitted: ((value: unknown) => void) | undefined;
-    const routes = routesOf((api) => {
-      api.subscription("throws", () => {
-        throw boom;
-      });
-      api.subscription("returns", (_args, emit) => {
-        emitted = emit;
-        return "no" as unknown as () => void;
-      });
-    });
-    const api = new ModuleApi(routes, { ...fakeDb(), onError: (error) => errors.push(error) });
-    const sent: unknown[] = [];
-    const unknown = thrown(() => api.subscribe("nothing", null, (v) => sent.push(v))) as ApiError;
-    expect(unknown).toBeInstanceOf(ApiError);
-    expect([unknown.code, unknown.status, unknown.message]).toEqual(["not-found", 404, "no subscription is named nothing"]);
-    const failed = thrown(() => api.subscribe("throws", null, (v) => sent.push(v))) as ApiError;
-    expect([failed.code, failed.message]).toEqual(["internal-error", "the subscription throws could not be opened"]);
-    const returned = thrown(() => api.subscribe("returns", null, (v) => sent.push(v))) as ApiError;
-    expect(returned.code).toBe("internal-error");
-    // Its emit sends nothing: the subscription never opened.
-    emitted?.(1);
-    expect(sent).toEqual([]);
-    expect(errors[0]).toBe(boom);
-    expect((errors[1] as Error).message).toBe("the subscription handler of returns returned no unsubscribe function");
-    // An onError that throws changes nothing of the refusal.
-    const loud = new ModuleApi(routes, {
-      ...fakeDb(),
-      onError: () => {
-        throw new Error("the logger broke");
-      },
-    });
-    expect((thrown(() => loud.subscribe("throws", null, () => undefined)) as ApiError).code).toBe("internal-error");
-  });
-
-  it("tells onError of an unsubscribe that throws, and goes on", () => {
-    const errors: unknown[] = [];
-    const boom = new Error("unsubscribe broke");
-    const routes = routesOf((api) =>
-      api.subscription("s", () => () => {
-        throw boom;
-      }),
-    );
-    const close = new ModuleApi(routes, { ...fakeDb(), onError: (error) => errors.push(error) }).subscribe("s", 1, () => undefined);
-    expect(() => close()).not.toThrow();
-    expect(errors).toEqual([boom]);
-    const quiet = new ModuleApi(routes, fakeDb()).subscribe("s", 1, () => undefined);
-    expect(() => quiet()).not.toThrow();
-  });
-});
-
 // ── on-start-api through the runner's dispatch, without a database ─────────────────────────────────────────────
 
 const UNUSED_WRITE: SchemaWriteHandle = Object.freeze({
@@ -763,7 +659,7 @@ describe("registerModuleApis: on-start-api once, at startup", () => {
         async "on-start-api"(_p, api) {
           kept = api;
           ran.push("first");
-          api.subscription("s", () => () => undefined);
+          api.http("GET", "/s", ok);
         },
       },
     });
@@ -774,7 +670,7 @@ describe("registerModuleApis: on-start-api once, at startup", () => {
         async "on-start-api"(_p, api) {
           ran.push("second");
           expect(() => (kept as ApiRegistry).http("GET", "/late", ok)).toThrow(/after its on-start-api callback ended/);
-          api.subscription("s", () => () => undefined);
+          api.http("GET", "/s", ok);
         },
       },
     });
@@ -782,7 +678,7 @@ describe("registerModuleApis: on-start-api once, at startup", () => {
     const error = await registerModuleApis({ graph, contexts }).catch((e: unknown) => e);
     expect(ran).toEqual(["first", "second"]);
     expect((error as UmbraError).code).toBe("duplicate-api-route");
-    expect((error as UmbraError).details).toEqual({ kind: "subscription", route: "s", modules: ["first", "second"] });
+    expect((error as UmbraError).details).toEqual({ kind: "http", route: "GET /s", modules: ["first", "second"] });
   });
 
   it("fails with the callback's failure, naming on-start-api and the module, and runs nothing after it", async () => {

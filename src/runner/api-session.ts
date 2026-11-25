@@ -10,18 +10,18 @@
  * UTF-8 (400 `invalid-request` otherwise) and passed with the URL's path and query to `ModuleApi.answer`. A body read
  * before the module API got the request is refused 400 `invalid-request`.
  *
- * **Subscriptions.** Each message is a JSON text of at most {@link ModuleApiLimits.maxMessageBytes}: `{ "type":
- * "subscribe", "id", "name", "args"? }` — `id` a string of 1 to 128 characters the client chooses, unique among its
- * open subscriptions — answered `{ "type": "subscribed", "id" }` before any value; then `{ "type": "next", "id",
- * "value" }` for each value the module emits; `{ "type": "unsubscribe", "id" }` is answered `{ "type": "complete",
- * "id" }`; what cannot be done is `{ "type": "error", "id"?, "error": { "code", "message" } }` (the module API's codes).
- * Values are written as the module API writes JSON (`encodeJson`): a value it cannot write throws at the module's
- * `emit`. A connection's end unsubscribes its subscriptions.
+ * **Subscriptions.** Each message is a JSON text of at most {@link ModuleApiLimits.maxMessageBytes}:
+ * - `{ "type": "subscribe", "topics": [...] }` adds topics (`<module-id>.<name>`), all or none, and is answered
+ *   `{ "type": "subscribed", "topics": [...held], "height" }`: the next frame is for `height + 1` (`height` null before
+ *   any commit), so a client reads routes up to `height` and follows the frames from there;
+ * - `{ "type": "unsubscribe", "topics": [...] }` is answered `{ "type": "unsubscribed", "topics": [...held] }`;
+ * - frames are the topic bus's (`./topic-bus.ts`), one per committed height from a `subscribe` (`topics: []` follows
+ *   the heights alone) until an `unsubscribe` leaves no topic (`topics: []` stops a heights-only one) or it closes;
+ * - what cannot be done is `{ "type": "error", "error": { "code", "message" } }` (the module API's codes).
  *
- * **Slow subscribers never hold the loop.** Subscription values are emitted from `on-after-db-write`, so `emit` hands the
- * text to the carrier and returns. A subscriber whose carrier still holds more than {@link MAX_BUFFERED_BYTES} unsent
- * when a value comes is disconnected and its subscriptions unsubscribed, after the module's `emit` returned. Values for
- * a closed subscriber are dropped. A carrier that does not tell what it holds bounds its own queue.
+ * **Slow subscribers never hold the loop.** A subscriber whose carrier still holds more than {@link MAX_BUFFERED_BYTES}
+ * unsent when a frame comes is disconnected; it catches up through routes. A carrier that does not tell what it holds
+ * bounds its own queue.
  *
  * **Over a channel** (`api.connect`): the module API's own rules, not the private link's — no envelope, no ping (the
  * host owns the channel's lifetime). A message that is no text is answered as a WebSocket's binary frame is; one over
@@ -36,6 +36,7 @@ import { exceedsUtf8, type PrivateLinkChannel } from "../library/channels.js";
 import { type CoreHeaders, withCoreHeaders } from "./api-answers.js";
 import type { RequestHeaders } from "../modules/declaration.js";
 import { type ApiError, apiErrorResponse, type ApiResponse, encodeJson, type ModuleApi } from "./module-api.js";
+import type { TopicBus, TopicSubscriber } from "./topic-bus.js";
 
 /** A request body's limit, by default: 1 MiB. */
 export const DEFAULT_MAX_BODY_BYTES = 1_048_576;
@@ -183,11 +184,7 @@ export function moduleApiFetch(api: ModuleApi, options: { readonly maxBodyBytes?
 }
 
 /** A subscription protocol error message. */
-const errorMessage = (code: ApiError["code"], message: string, id?: string) => ({
-  type: "error",
-  ...(id === undefined ? {} : { id }),
-  error: { code, message },
-});
+const errorMessage = (code: ApiError["code"], message: string) => ({ type: "error", error: { code, message } });
 
 /** A connection's rules: how much a subscriber may hold unsent, and whether it is told what cannot be done. */
 export interface ConnectionRules {
@@ -215,23 +212,18 @@ export interface SubscriptionCarrier {
  * One subscriber's connection (see the module comment): its carrier gives it each message the client sent
  * ({@link received}) and tells it when it ended ({@link ended}).
  */
-export class SubscriptionConnection {
+export class SubscriptionConnection implements TopicSubscriber {
   readonly #carrier: SubscriptionCarrier;
-  readonly #api: ModuleApi;
+  readonly #topics: TopicBus;
   readonly #rules: ConnectionRules;
-  readonly #subscriptions = new Map<string, () => void>();
 
   constructor(carrier: SubscriptionCarrier, api: ModuleApi, rules: ConnectionRules) {
     this.#carrier = carrier;
-    this.#api = api;
+    this.#topics = api.topics;
     this.#rules = rules;
   }
 
-  /**
-   * Writes `text`, unless the subscriber holds more than its limit unsent: then it is disconnected instead — its end,
-   * which comes after the module's emit returned, unsubscribes its subscriptions, so a module's unsubscribe never runs
-   * inside its own emit. After the end nothing is written (the carrier drops it).
-   */
+  /** Writes `text`, unless the subscriber holds more than its limit unsent: then it is disconnected instead. */
   #write(text: string): void {
     const held = this.#carrier.bufferedAmount();
     if (held !== null && held > this.#rules.maxBufferedBytes) this.#carrier.disconnect();
@@ -247,6 +239,11 @@ export class SubscriptionConnection {
     if (this.#rules.answersErrors) this.#send(message);
   }
 
+  /** A frame of the topic bus. */
+  deliver(text: string): void {
+    this.#write(text);
+  }
+
   /** One message the client sent: its text, or undefined for one that is no text (a binary frame). */
   received(text: string | undefined): void {
     let message: unknown;
@@ -256,65 +253,29 @@ export class SubscriptionConnection {
     } catch {
       message = undefined;
     }
-    const { type, id, name, args } = (message ?? {}) as Record<string, unknown>;
+    const { type, topics } = (message ?? {}) as Record<string, unknown>;
     if (typeof message !== "object" || message === null || Array.isArray(message) || typeof type !== "string") {
       this.#refuse(errorMessage(INVALID, "a message is a JSON object with a type"));
-    } else if (type === "subscribe") {
-      if (typeof id !== "string" || id.length < 1 || id.length > 128 || typeof name !== "string") {
-        this.#refuse(errorMessage(INVALID, "a subscribe message has an id, a string of 1 to 128 characters, and a name, a string"));
-      } else if (this.#subscriptions.has(id)) {
-        this.#refuse(errorMessage(INVALID, `the subscription ${id} is open already`, id));
-      } else {
-        this.#subscribe(id, name, args);
-      }
-    } else if (type === "unsubscribe") {
-      const unsubscribe = typeof id === "string" ? this.#subscriptions.get(id) : undefined;
-      if (typeof id === "object" && id !== null) {
-        // An object or a list is never converted to text: its conversion may throw (`{ "toString": null }`), and the
-        // connection's fault must stay the connection's.
-        this.#refuse(errorMessage(INVALID, `an unsubscribe message's id is a string, not ${Array.isArray(id) ? "a list" : "an object"}`));
-      } else if (unsubscribe === undefined) {
-        this.#refuse(errorMessage(INVALID, `no subscription ${String(id)} is open`, typeof id === "string" ? id : undefined));
-      } else {
-        this.#subscriptions.delete(id as string);
-        unsubscribe();
-        this.#send({ type: "complete", id });
-      }
-    } else {
+    } else if (type !== "subscribe" && type !== "unsubscribe") {
       this.#refuse(errorMessage(INVALID, "a message's type is subscribe or unsubscribe"));
+    } else if (!Array.isArray(topics) || !topics.every((topic) => typeof topic === "string")) {
+      this.#refuse(errorMessage(INVALID, `${type} takes topics, a list of strings`));
+    } else if (type === "subscribe") {
+      const unknown = topics.find((topic) => !this.#topics.has(topic));
+      if (unknown !== undefined) {
+        this.#refuse(errorMessage("not-found", `no topic is named ${String(unknown).slice(0, 200)}`));
+        return;
+      }
+      const held = this.#topics.subscribe(this, topics);
+      this.#send({ type: "subscribed", topics: held, height: this.#topics.height });
+    } else {
+      this.#send({ type: "unsubscribed", topics: this.#topics.unsubscribe(this, topics) });
     }
   }
 
-  /** Opens subscription `id`: the values the module emits while its handler runs are sent after the acknowledgement. */
-  #subscribe(id: string, name: string, args: unknown): void {
-    let opening = true;
-    const early: string[] = [];
-    const send = (value: unknown): void => {
-      const text = encodeJson({ type: "next", id, value }) as string;
-      if (opening) early.push(text);
-      else this.#write(text);
-    };
-    let unsubscribe: () => void;
-    try {
-      unsubscribe = this.#api.subscribe(name, args, send);
-    } catch (error) {
-      // `ModuleApi.subscribe` throws only `ApiError`s.
-      const { code, message } = error as ApiError;
-      this.#refuse(errorMessage(code, message, id));
-      return;
-    } finally {
-      opening = false;
-    }
-    this.#subscriptions.set(id, unsubscribe);
-    this.#send({ type: "subscribed", id });
-    for (const text of early) this.#write(text);
-  }
-
-  /** The carrier ended: every subscription of the connection is unsubscribed, once. */
+  /** The carrier ended: the connection holds no topics any more. */
   ended(): void {
-    const all = [...this.#subscriptions.values()];
-    this.#subscriptions.clear();
-    for (const unsubscribe of all) unsubscribe();
+    this.#topics.detach(this);
   }
 }
 

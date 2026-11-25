@@ -5,12 +5,12 @@ import { spawnChild } from "../child-processes.js";
 import { EXAMPLE } from "./example-checks.js";
 
 /**
- * `examples/stats-module/try.sh subscribe` prints the subscription's messages until three rows arrived, and no more
- *: run as a user runs it (`bash`, its own `node` client with the repository's `ws`), with `STATS_API` at
- * a local `ws` server that answers the subscription and sends 12 rows at once, as a syncing process does.
+ * `examples/stats-module/try.sh subscribe` prints the subscription's messages until three heights' frames arrived, and no
+ * more: run as a user runs it (`bash`, its own `node` client with the repository's `ws`), with `STATS_API` at a local
+ * `ws` server that answers the subscribe and sends 12 frames at once, as a syncing process does.
  */
 
-/** Rows the server sends, all at once after the acknowledgement. */
+/** Frames the server sends, all at once after the acknowledgement. */
 const SENT = 12;
 
 let server: WebSocketServer | undefined;
@@ -21,20 +21,28 @@ afterEach(async () => {
   server = undefined;
 });
 
-/** A server on a free port that answers a subscribe with `subscribed` and {@link SENT} rows; resolves with its port. */
+/** A server on a free port that answers a subscribe with `subscribed` and {@link SENT} frames; resolves with its port. */
 async function rowsServer(): Promise<number> {
   const started = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   server = started;
   await new Promise<void>((resolve) => started.once("listening", () => resolve()));
   started.on("connection", (socket) => {
     socket.on("message", (data) => {
-      const { id } = JSON.parse(String(data)) as { readonly id: string };
-      socket.send(JSON.stringify({ type: "subscribed", id }));
-      for (let height = 1; height <= SENT; height++) socket.send(JSON.stringify({ type: "next", id, value: { height: `${height}` } }));
+      const { topics } = JSON.parse(String(data)) as { readonly topics: readonly string[] };
+      socket.send(JSON.stringify({ type: "subscribed", topics, height: null }));
+      for (let height = 1; height <= SENT; height++) socket.send(JSON.stringify(frame(height)));
     });
   });
   return (started.address() as { readonly port: number }).port;
 }
+
+/** The frame of `height`, as the module API writes it. */
+const frame = (height: number) => ({
+  type: "height",
+  height: `${height}`,
+  hash: "0x01",
+  messages: [{ topic: "stats-module.blocks", value: { height: `${height}` } }],
+});
 
 /** Runs `try.sh subscribe` against `port` and resolves with its exit code and standard output. */
 function subscribe(port: number): Promise<{ readonly code: number | null; readonly stdout: string; readonly stderr: string }> {
@@ -65,15 +73,15 @@ function subscribe(port: number): Promise<{ readonly code: number | null; readon
 }
 
 describe("examples/stats-module/try.sh subscribe", () => {
-  it(`prints the acknowledgement and the first three of ${SENT} rows sent at once, then nothing`, async () => {
+  it(`prints the acknowledgement and the first three of ${SENT} frames sent at once, then nothing`, async () => {
     const port = await rowsServer();
     const { code, stdout, stderr } = await subscribe(port);
     expect(stderr).toBe("");
     expect(code).toBe(0);
     const messages = stdout.split("\n").filter((line) => line.startsWith("{"));
     expect(messages).toEqual([
-      '{"type":"subscribed","id":"s1"}',
-      ...[1, 2, 3].map((height) => `{"type":"next","id":"s1","value":{"height":"${height}"}}`),
+      '{"type":"subscribed","topics":["stats-module.blocks"],"height":null}',
+      ...[1, 2, 3].map((height) => JSON.stringify(frame(height))),
     ]);
   }, 90_000);
 });

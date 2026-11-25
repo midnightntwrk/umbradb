@@ -19,6 +19,7 @@ import { type EntryBuilder, moduleEntryBuilder } from "../config/entries.js";
 import type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "../db/api.js";
 import type { ContentFunction } from "../determinism/contents-hash.js";
 import type { BinaryRoute, Route } from "./route.js";
+import type { Topic, TopicSink } from "./topic.js";
 
 /** The points: the runner's steps where module callbacks attach, in the order the runner reaches them. */
 export const POINTS = Object.freeze([
@@ -146,6 +147,8 @@ export interface ModuleDeclaration {
    * task declares `needsState`.
    */
   ledgerTasks?: readonly LedgerTask[];
+  /** The topics the module publishes to from `on-db-write` (`./topic.ts`). */
+  topics?: readonly Topic[];
   points: Partial<PointCallbacks>;
 }
 
@@ -223,7 +226,7 @@ export interface RequestHeaders {
   readonly ifMatch?: string;
 }
 
-/** Where `on-start-api` registers the module's routes, raw HTTP handlers and subscriptions. */
+/** Where `on-start-api` registers the module's routes and raw HTTP handlers. */
 export interface ApiRegistry {
   /**
    * Registers a route (`./route.ts`): a named operation with an input and an output schema and no transport. The core
@@ -244,8 +247,6 @@ export interface ApiRegistry {
       read: ReadHandle,
     ) => Promise<{ status: number; headers?: Record<string, string>; body: unknown }>,
   ): void;
-  /** `handler` returns its unsubscribe. */
-  subscription(name: string, handler: (args: unknown, emit: (value: unknown) => void) => () => void): void;
 }
 
 /**
@@ -269,7 +270,7 @@ export interface PointCallbacks {
   "on-finalized"(p: ProcessContext, head: { height: bigint; hash: Uint8Array }, read: ReadHandle): Promise<void>;
   "on-start-height"(p: ProcessContext, e: { entryId: string; height: bigint }, read: ReadHandle): Promise<void>;
   "on-compute"(p: ProcessContext, b: BlockContext, read: ReadHandle, out: ItemSink): Promise<void>;
-  "on-db-write"(p: ProcessContext, b: BlockContext, w: BlockWriteHandle): Promise<void>;
+  "on-db-write"(p: ProcessContext, b: BlockContext, w: BlockWriteHandle, topics: TopicSink): Promise<void>;
   "on-settle"(p: ProcessContext, run: BlockRun, w: BlockWriteHandle): Promise<void>;
   "on-after-db-write"(p: ProcessContext, b: BlockContext, read: ReadHandle): Promise<void>;
   "on-stop-height"(p: ProcessContext, e: { entryId: string; height: bigint }, read: ReadHandle): Promise<void>;

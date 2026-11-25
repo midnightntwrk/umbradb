@@ -24,8 +24,9 @@ import { eventually, exchange, type Exchanged, headerValues, type MapiHooks, map
  * - `admin.fetch` answers the four endpoints as mounted `admin.http` does, in every state and after `closed`.
  * - `api.connect(channel)` runs the module API's subscription protocol on a host's channel — a Node.js `MessageChannel`
  *   through `messagePortChannel`, and a test-owned channel — with the module API's rules and no envelope: its error
- *   answers (an `unsubscribe` whose id is an object whose conversion to text throws among them), its 64 KiB message limit in UTF-8 bytes (the channel closed), its slow-subscriber close through
- *   `bufferedAmount` (after the module's emit returned), the channels closed at the stop; a channel offered while the
+ *   answers (an `unsubscribe` whose topics are an object whose conversion to text throws among them), a frame per
+ *   committed height, its 64 KiB message limit in UTF-8 bytes (the channel closed), its slow-subscriber close through
+ *   `bufferedAmount`, the channels closed at the stop; a channel offered while the
  *   module API does not serve gets the lifecycle's body, then is closed.
  * - `[NEG]` Each check removed on the mounted paths (`mountedApi`: the message limit, the slow-subscriber check, the
  *   error answers, the body limit, the core's headers) fails its oracle row.
@@ -45,14 +46,11 @@ const reaches = (engine: ProcessHandle, height: bigint): Promise<void> =>
     return status.cursor === height;
   }, `the cursor at ${height}`, 120_000);
 
-/**
- * `mapi`'s hooks, and a wait for the module's own emits to `feed` to be over: its `on-after-db-write` of `height`, the
- * last height, has run — so a subscription opened after it gets only the test's own values.
- */
+/** `mapi`'s hooks, and a wait for its `on-after-db-write` of `height`: the height's frame has gone out by then. */
 function quietHooks(): { readonly hooks: MapiHooks; settled(height: bigint): Promise<void> } {
   const written: bigint[] = [];
   return {
-    hooks: { emits: new Set(), afterWrite: (height) => written.push(height) },
+    hooks: { afterWrite: (height) => written.push(height) },
     settled: (height) => eventually(() => written.includes(height), `on-after-db-write of ${height}`, 120_000),
   };
 }
@@ -96,19 +94,34 @@ const NOT_UTF8 = new Uint8Array([0x7b, 0xff, 0xfe, 0x7d]);
 const PROTOCOL_ERRORS = [
   { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } },
   { type: "error", error: { code: "invalid-request", message: "a message's type is subscribe or unsubscribe" } },
-  {
-    type: "error",
-    error: { code: "invalid-request", message: "a subscribe message has an id, a string of 1 to 128 characters, and a name, a string" },
-  },
-  { type: "error", id: "x", error: { code: "not-found", message: "no subscription is named nothing" } },
+  { type: "error", error: { code: "invalid-request", message: "subscribe takes topics, a list of strings" } },
+  { type: "error", error: { code: "not-found", message: "no topic is named mapi.nothing" } },
   // A message that is no text, as a WebSocket's binary frame.
   { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } },
-  // An id whose conversion to text throws: answered, never thrown out of the channel's callback.
-  { type: "error", error: { code: "invalid-request", message: "an unsubscribe message's id is a string, not an object" } },
+  // Topics whose conversion to text throws: answered, never thrown out of the channel's callback.
+  { type: "error", error: { code: "invalid-request", message: "unsubscribe takes topics, a list of strings" } },
 ];
 
-/** An `unsubscribe` whose id is an object whose conversion to text throws. */
-const POISONED_UNSUBSCRIBE = '{"type":"unsubscribe","id":{"toString":null}}';
+/** An `unsubscribe` whose topics are an object whose conversion to text throws. */
+const POISONED_UNSUBSCRIBE = '{"type":"unsubscribe","topics":{"toString":null}}';
+
+const SUBSCRIBE_FEED = { type: "subscribe", topics: ["mapi.feed"] };
+
+/** Finalizes the height after `from` on `source`, then the next on each call, waiting for `engine` to commit it. */
+function heightsAfter(engine: ProcessHandle, source: InMemoryBlockSource, from: bigint): () => Promise<void> {
+  let height = from;
+  return async () => {
+    height += 1n;
+    source.finalize(height);
+    await reaches(engine, height);
+  };
+}
+
+/** `message` with a frame's hash, if any, checked and replaced, so frames compare across runs. */
+const hashless = (message: unknown): unknown => {
+  const hash = (message as { hash?: unknown } | null)?.hash;
+  return typeof hash === "string" && /^0x[0-9a-f]+$/.test(hash) ? { ...(message as object), hash: "0x…" } : message;
+};
 
 /** The test's end of a Node.js `MessageChannel` the engine's `api.connect` serves: every message kept, and its close. */
 class PortPeer {
@@ -157,84 +170,82 @@ interface ConnectSeen {
   readonly envelopeFree: boolean;
   readonly values: readonly unknown[];
   readonly oversizeClosed: { readonly ascii: boolean; readonly utf8: boolean };
-  readonly slow: { readonly disconnected: boolean; readonly insideEmit: boolean; readonly sentAnyway: boolean };
+  readonly slow: { readonly disconnected: boolean; readonly sentAnyway: boolean };
 }
 
-/** The `api.connect` checks on a serving `engine` (see the module comment), `hooks` the module's emits. */
-async function connectSeen(engine: ProcessHandle, hooks: MapiHooks): Promise<ConnectSeen> {
+/** The `api.connect` checks on a serving `engine` at `from` (see the module comment); `next` commits one more height. */
+async function connectSeen(engine: ProcessHandle, from: bigint, next: () => Promise<void>): Promise<ConnectSeen> {
   const protocol = connected(engine);
-  for (const message of ["{not json", { type: "dance" }, { type: "subscribe", id: 7, name: "feed" }, { type: "subscribe", id: "x", name: "nothing" }, { raw: { not: "text" } }, POISONED_UNSUBSCRIBE]) {
+  for (const message of ["{not json", { type: "dance" }, { type: "subscribe", topics: 7 }, { type: "subscribe", topics: ["mapi.nothing"] }, { raw: { not: "text" } }, POISONED_UNSUBSCRIBE]) {
     protocol.send(message);
   }
   const errors = await protocol.count(PROTOCOL_ERRORS.length, 3_000);
-  // A subscription's values, then its end, on the same channel; every message the module API's own, no envelope.
-  protocol.send({ type: "subscribe", id: "s1", name: "feed" });
+  // Two heights' frames, then the unsubscribe, on the same channel; every message the module API's own, no envelope.
+  protocol.send(SUBSCRIBE_FEED);
   await protocol.count(PROTOCOL_ERRORS.length + 1);
-  for (const emit of [...hooks.emits]) emit({ height: 41n });
-  for (const emit of [...hooks.emits]) emit({ bytes: new Uint8Array([1, 2]) });
-  protocol.send({ type: "unsubscribe", id: "s1" });
-  const values = (await protocol.count(PROTOCOL_ERRORS.length + 4)).slice(PROTOCOL_ERRORS.length);
+  await next();
+  await next();
+  protocol.send({ type: "unsubscribe", topics: ["mapi.feed"] });
+  const values = (await protocol.count(PROTOCOL_ERRORS.length + 4)).slice(PROTOCOL_ERRORS.length).map(hashless);
   const envelopeFree = protocol.raw.every((data) => typeof data === "string" && !("link" in (JSON.parse(data) as object)));
   protocol.close();
-  await eventually(() => hooks.emits.size === 0, "the protocol channel unsubscribed");
 
-  /** Whether `message`, sent after a subscription opened, closes the channel within 3 s (and unsubscribes it). */
+  /** Whether `message`, sent after a subscription opened, closes the channel within 3 s. */
   const closesOn = async (message: string): Promise<boolean> => {
     const big = connected(engine);
-    big.send({ type: "subscribe", id: "1", name: "feed" });
+    big.send(SUBSCRIBE_FEED);
     await big.count(1);
     big.send(message);
     const closed = await until(() => big.closed, "the channel closed", 3_000).then(() => true, () => false);
     big.close();
-    await eventually(() => hooks.emits.size === 0, "the oversized message's channel unsubscribed");
     return closed;
   };
-  const ascii = await closesOn(JSON.stringify({ type: "subscribe", id: "2", name: "feed", args: "x".repeat(65_536) }));
+  const ascii = await closesOn(JSON.stringify({ type: "subscribe", topics: ["x".repeat(65_536)] }));
   // Past 64 KiB in UTF-8 bytes, under it in characters.
-  const utf8 = await closesOn(JSON.stringify({ type: "subscribe", id: "2", name: "feed", args: "é".repeat(32_768) }));
+  const utf8 = await closesOn(JSON.stringify({ type: "subscribe", topics: ["é".repeat(32_768)] }));
 
-  // A carrier that tells what it holds: past 1 MiB, the subscriber is disconnected after the module's emit returned.
+  // A carrier that tells what it holds: past 1 MiB, the next frame disconnects the subscriber instead of being sent.
   let held = 0;
   const [mine, theirs] = channelPair({ bufferedAmount: () => held, terminate: true });
   const seen: string[] = [];
   theirs.onMessage((message) => seen.push(message));
   engine.api.connect(mine);
-  theirs.send(JSON.stringify({ type: "subscribe", id: "slow", name: "feed" }));
+  theirs.send(JSON.stringify(SUBSCRIBE_FEED));
   await until(() => seen.length >= 1, "the slow subscriber subscribed").catch((error: unknown) => {
-    const why = { seen, ended: mine.ended, listeners: mine.listeners, emits: hooks.emits.size, state: engine.status().state };
+    const why = { seen, ended: mine.ended, listeners: mine.listeners, state: engine.status().state };
     throw new Error(`${(error as Error).message}: ${JSON.stringify(why)}`);
   });
-  expect(seen.map((message) => JSON.parse(message))).toEqual([{ type: "subscribed", id: "slow" }]);
+  expect(seen.map((message) => JSON.parse(message))).toEqual([{ type: "subscribed", topics: ["mapi.feed"], height: String(from + 2n) }]);
   held = 2 * 1_048_576;
-  let insideEmit = false;
-  for (const emit of [...hooks.emits]) emit({ big: true });
-  // The unsubscribe has not run inside the emit: the subscription is still there when it returned.
-  insideEmit = hooks.emits.size === 0;
-  await eventually(() => hooks.emits.size === 0, "the slow subscriber unsubscribed", 3_000).catch(() => undefined);
+  await next();
   await new Promise((resolve) => setImmediate(resolve));
-  const slow = { disconnected: hooks.emits.size === 0 && mine.terminations === 1, insideEmit, sentAnyway: seen.length > 1 };
+  const slow = { disconnected: mine.terminations === 1, sentAnyway: seen.length > 1 };
   theirs.close();
-  await eventually(() => hooks.emits.size === 0, "the slow channel unsubscribed");
   return { errors, envelopeFree, values, oversizeClosed: { ascii, utf8 }, slow };
 }
 
-/** The `api.connect` oracle over what was seen (see the module comment). */
-function connectProblems(seen: ConnectSeen): string[] {
+/** The `api.connect` oracle over what was seen at `from` (see the module comment). */
+function connectProblems(seen: ConnectSeen, from: bigint): string[] {
   const problems: string[] = [];
   if (JSON.stringify(seen.errors) !== JSON.stringify(PROTOCOL_ERRORS)) problems.push(`the protocol's checks answered ${JSON.stringify(seen.errors)}`);
   if (!seen.envelopeFree) problems.push("a message carried an envelope");
+  const frame = (height: bigint) => ({
+    type: "height",
+    height: String(height),
+    hash: "0x…",
+    messages: [{ topic: "mapi.feed", value: { height: String(height) } }],
+  });
   const values = [
-    { type: "subscribed", id: "s1" },
-    { type: "next", id: "s1", value: { height: "41" } },
-    { type: "next", id: "s1", value: { bytes: "0x0102" } },
-    { type: "complete", id: "s1" },
+    { type: "subscribed", topics: ["mapi.feed"], height: String(from) },
+    frame(from + 1n),
+    frame(from + 2n),
+    { type: "unsubscribed", topics: [] },
   ];
   if (JSON.stringify(seen.values) !== JSON.stringify(values)) problems.push(`the subscription gave ${JSON.stringify(seen.values)}`);
   if (!seen.oversizeClosed.ascii) problems.push("a message over 64 KiB left the channel open");
   if (!seen.oversizeClosed.utf8) problems.push("a message over 64 KiB in UTF-8 bytes left the channel open");
   if (!seen.slow.disconnected) problems.push("a subscriber holding more than 1 MiB unsent stayed connected");
-  if (seen.slow.insideEmit) problems.push("the slow subscriber was unsubscribed inside the module's emit");
-  if (seen.slow.sentAnyway) problems.push("the value was sent to a subscriber past its limit");
+  if (seen.slow.sentAnyway) problems.push("the frame was sent to a subscriber past its limit");
   return problems;
 }
 
@@ -291,7 +302,7 @@ describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $
 
   it("api.fetch answers as mounted api.http: status, body, type and core headers; 413, 400; 504 on PostgreSQL", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set() };
+    const hooks: MapiHooks = {};
     const m = mapiModule(hooks);
     const engine = engineOf({
       config: { data: libraryData(db.setting, [m], { apiReadTimeoutMs: 1_000 }) },
@@ -330,7 +341,7 @@ describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $
 
   it("the lifecycle: 503 not-serving before and after the module API serves, channels refused then, admin.fetch throughout", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set(), startDb: gate() };
+    const hooks: MapiHooks = { startDb: gate() };
     const m = mapiModule(hooks);
     const engine = engineOf({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 2n }) });
     const host = await mountHandlers(engine);
@@ -358,14 +369,12 @@ describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $
       const serving = await engine.api.fetch(requestOf("GET", "/rows"));
       const hash = serving.headers.get("x-umbra-config-hash");
       expect([serving.status, hash]).toEqual([200, expect.stringMatching(/^0x[0-9a-f]{64}$/)]);
-      // A channel open at the stop: the module API's close closes it and unsubscribes it.
+      // A channel open at the stop: the module API's close closes it.
       const open = connected(engine);
-      open.send({ type: "subscribe", id: "s", name: "feed" });
-      await open.count(1);
-      expect(hooks.emits.size).toBe(1);
+      open.send(SUBSCRIBE_FEED);
+      expect(await open.count(1)).toEqual([{ type: "subscribed", topics: ["mapi.feed"], height: "2" }]);
       await engine.stop();
       await until(() => open.closed, "the channel open at the stop closed");
-      expect(hooks.emits.size).toBe(0);
       const after = await engine.api.fetch(requestOf("GET", "/rows"));
       expect(after.headers.get("x-umbra-config-hash")).toBe(hash);
       expect([after.status, ((await after.json()) as { state: string }).state]).toEqual([503, "stopping"]);
@@ -430,12 +439,13 @@ describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $
     const db = await backend.database();
     const { hooks, settled } = quietHooks();
     const m = mapiModule(hooks);
-    const engine = engineOf({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 2n }) });
+    const source = new InMemoryBlockSource({ head: 2n });
+    const engine = engineOf({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source });
     try {
       await engine.started;
       await reaches(engine, 2n);
       await settled(2n);
-      expect(connectProblems(await connectSeen(engine, hooks))).toEqual([]);
+      expect(connectProblems(await connectSeen(engine, 2n, heightsAfter(engine, source, 2n)), 2n)).toEqual([]);
     } finally {
       await engine.stop();
     }
@@ -451,15 +461,13 @@ describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $
       const db = await backend.database();
       const { hooks, settled } = quietHooks();
       const m = mapiModule(hooks);
-      const engine = engineOf(
-        { config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 1n }) },
-        { mountedApi: control.seams },
-      );
+      const source = new InMemoryBlockSource({ head: 1n });
+      const engine = engineOf({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source }, { mountedApi: control.seams });
       try {
         await engine.started;
         await reaches(engine, 1n);
         await settled(1n);
-        expect(connectProblems(await connectSeen(engine, hooks)), control.what).toContain(control.fails);
+        expect(connectProblems(await connectSeen(engine, 1n, heightsAfter(engine, source, 1n)), 1n), control.what).toContain(control.fails);
       } finally {
         await engine.stop();
       }
@@ -470,7 +478,7 @@ describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $
       ["no core headers", { coreHeaders: "none" }, "GET /rows: X-Umbra-Version null"],
     ] as const) {
       const db = await backend.database();
-      const m = mapiModule({ emits: new Set() });
+      const m = mapiModule({});
       const engine = engineOf(
         { config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 1n }) },
         { mountedApi: seams },

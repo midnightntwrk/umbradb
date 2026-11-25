@@ -253,7 +253,7 @@ export const mountedAdminTests = (backend: ProcessBackend) => describe(`mounted 
   it("no database read per request — the four endpoints answer within 1 s while the database is held", async () => {
     const db = await backend.database();
     const held = gate();
-    const hooks: MapiHooks = { emits: new Set(), writes: new Map([[4n, held]]) };
+    const hooks: MapiHooks = { writes: new Map([[4n, held]]) };
     const m = mapiModule(hooks);
     const source = new InMemoryBlockSource({ head: 3n });
     const handle = startUmbraDB({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source });
@@ -330,7 +330,7 @@ export const mountedAdminTests = (backend: ProcessBackend) => describe(`mounted 
     const db = await backend.database();
     const { database, extra, others } = await secretSettings(db);
     const failure = `${SECRET_TEXT}; database ${JSON.stringify(database)}; ${others.join(", ")}; ${SECRET_NODE}`;
-    const hooks: MapiHooks = { emits: new Set(), haltAt: 2n, failure };
+    const hooks: MapiHooks = { haltAt: 2n, failure };
     const m = mapiModule(hooks);
     const handle = startWithSeams(
       { config: { data: libraryData(database, [m], extra) }, modules: [m], source: new InMemoryBlockSource({ head: 4n }) },
@@ -386,7 +386,7 @@ export const mountedAdminTests = (backend: ProcessBackend) => describe(`mounted 
       const db = await backend.database();
       const { database, extra } = await secretSettings(db);
       rawSettings = { database, ...extra };
-      const m = mapiModule({ emits: new Set() });
+      const m = mapiModule({});
       const handle = startWithSeams(
         { config: { data: libraryData(database, [m], extra) }, modules: [m], source: new InMemoryBlockSource({ head: 1n }) },
         { adminSeams: { mountedAnswer: rawConfig } },

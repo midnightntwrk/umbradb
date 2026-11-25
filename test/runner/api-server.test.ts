@@ -10,6 +10,10 @@ import {
 import { createServer, type Server, Socket } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { z } from "zod";
+import { bigintText } from "../../src/helpers/bigint-text.js";
+import { defineTopic } from "../../src/modules/topic.js";
+import { TopicBus } from "../../src/runner/topic-bus.js";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
 import type { BlockWriteHandle, Database, ReadHandle, ReadOptions } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -223,19 +227,20 @@ const RAW = Object.freeze({
 /** The headers HTTP itself writes (Node.js's server), beside a module's. */
 const TRANSPORT_HEADERS = new Set(["date", "connection", "keep-alive", "content-length", "transfer-encoding"]);
 
+const HEIGHTS = defineTopic("heights", z.object({ height: bigintText(), rows: bigintText() }));
+
 /**
  * The module `chain-api`:
  * - its rows;
  * - routes that state their view with the envelope's helpers (`GET /height`, `GET /rows/:height`, `POST /graphql`);
  * - routes that do not (`POST /plain`, a GraphQL response's shape, and `GET /raw`, its own status, headers and bytes);
  * - routes whose handlers fail (`GET /fails`: 500, `GET /timeout`: a read's `query-timeout`, 504);
- * - a subscription notified from its `on-after-db-write`.
+ * - the topic `heights`, emitted from its `on-db-write`.
  */
 function chainApi() {
   const calls: string[] = [];
-  const listeners = new Set<(value: unknown) => void>();
-  let unsubscribed = 0;
   const module = declaration("chain-api", {
+    topics: [HEIGHTS],
     points: {
       async "on-start-api"(_p, api: ApiRegistry) {
         api.http("GET", "/height", async (_req, read) => {
@@ -275,32 +280,15 @@ function chainApi() {
         api.http("GET", "/timeout", async () => {
           throw new UmbraError("query-timeout", "the read of GET /timeout ran past apiReadTimeoutMs");
         });
-        api.subscription("heights", (args, emit) => {
-          listeners.add(emit);
-          if (args !== null && typeof args === "object" && "hello" in args) emit({ hello: (args as { hello: unknown }).hello });
-          return () => {
-            listeners.delete(emit);
-            unsubscribed++;
-          };
-        });
       },
-      async "on-db-write"(_p, b, w: BlockWriteHandle) {
+      async "on-db-write"(_p, b, w: BlockWriteHandle, topics) {
         await w.execute("INSERT INTO chain_api.rows (height) VALUES ($1)", [b.height]);
-      },
-      async "on-after-db-write"(_p, b, read: ReadHandle) {
-        const [row] = await read.query("SELECT count(*)::bigint AS rows FROM chain_api.rows");
-        for (const emit of listeners) emit({ height: b.height, rows: row?.rows, read: read.height });
+        const [row] = await w.query("SELECT count(*)::bigint AS rows FROM chain_api.rows");
+        topics.emit(HEIGHTS, { height: b.height, rows: row?.rows as bigint });
       },
     },
   });
-  return {
-    module,
-    calls,
-    listeners,
-    get unsubscribed() {
-      return unsubscribed;
-    },
-  };
+  return { module, calls };
 }
 
 /** A module `id` whose `on-start-api` runs `register`. */
@@ -465,13 +453,12 @@ async function versionProblems(url: string, ws: string, committed: boolean, conf
   return problems;
 }
 
-/** The duplicate oracle: the problems found when two modules register `GET /same`, or the subscription `same`. */
+/** The duplicate oracle: the problems found when two modules register `GET /same`. */
 async function duplicateProblems(db: () => Promise<Database>, routes: () => ApiRoutes = () => new ApiRoutes()): Promise<string[]> {
   const problems: string[] = [];
-  for (const kind of ["http", "subscription"] as const) {
+  for (const kind of ["http"] as const) {
     const port = await freePort();
-    const register = (api: ApiRegistry) =>
-      kind === "http" ? api.http("GET", "/same", ok) : api.subscription("same", () => () => undefined);
+    const register = (api: ApiRegistry) => api.http("GET", "/same", ok);
     const outcome = await startProcess(
       await db(),
       [registering("a-api", register), registering("b-api", register)],
@@ -484,7 +471,7 @@ async function duplicateProblems(db: () => Promise<Database>, routes: () => ApiR
       },
       (error: unknown) => error,
     );
-    const route = kind === "http" ? "GET /same" : "same";
+    const route = "GET /same";
     if (
       !(
         outcome instanceof UmbraError &&
@@ -501,7 +488,7 @@ async function duplicateProblems(db: () => Promise<Database>, routes: () => ApiR
 
 /** A negative control: routes that take one route of two modules for two routes. */
 class AcceptsDuplicates extends ApiRoutes {
-  protected override key(kind: "http" | "subscription", module: string, route: string): string {
+  protected override key(kind: "http", module: string, route: string): string {
     return `${module} ${super.key(kind, module, route)}`;
   }
 }
@@ -703,60 +690,59 @@ describe.each(RUNNER_BACKENDS)("module APIs on listen.api on $name", (backend) =
     }
   }, 120_000);
 
-  it("notifies a subscription from the module's on-after-db-write with exactly its values; unsubscribes on unsubscribe and on close", async () => {
+  it("sends each committed height's frame with exactly what on-db-write emitted; detaches on unsubscribe and on close; repeats no height after a restart", async () => {
     const { db } = await backend.database();
     const api = chainApi();
     const process = await started(db, [api.module], [entry("chain-api", 1)]);
+    const subscribe = { type: "subscribe", topics: ["chain-api.heights"] };
     const first = await Client.connect(process.ws);
-    first.send({ type: "subscribe", id: "a", name: "heights", args: { hello: 12345678901234567890n.toString() } });
-    expect(await first.until(2)).toEqual([
-      { type: "subscribed", id: "a" },
-      { type: "next", id: "a", value: { hello: "12345678901234567890" } },
-    ]);
+    first.send(subscribe);
+    expect(await first.until(1)).toEqual([{ type: "subscribed", topics: ["chain-api.heights"], height: null }]);
     const second = await Client.connect(process.ws);
-    second.send({ type: "subscribe", id: "b", name: "heights" });
+    second.send(subscribe);
     await second.until(1);
-    expect(api.listeners.size).toBe(2);
+    expect(process.api.topics.subscriberCount).toBe(2);
 
     const source = new InMemoryBlockSource({ head: 2n });
     await runLoop(process, source, 2n);
-    // Each value exactly as the module emitted it (toEqual: no member added), in the protocol's `next`.
-    const notified = (height: number, id: string) => ({
-      type: "next",
-      id,
-      value: { height: String(height), rows: String(height), read: String(height) },
+    // Each message exactly as the module emitted it, written by the topic's schema (toEqual: no member added).
+    const frame = (height: number) => ({
+      type: "height",
+      height: String(height),
+      hash: expect.stringMatching(/^0x[0-9a-f]+$/),
+      messages: [{ topic: "chain-api.heights", value: { height: String(height), rows: String(height) } }],
     });
-    expect((await first.until(4)).slice(2)).toEqual([notified(1, "a"), notified(2, "a")]);
-    expect((await second.until(3)).slice(1)).toEqual([notified(1, "b"), notified(2, "b")]);
+    expect((await first.until(3)).slice(1)).toEqual([frame(1), frame(2)]);
+    expect((await second.until(3)).slice(1)).toEqual([frame(1), frame(2)]);
 
-    // Unsubscribing by message: the module's unsubscribe runs, and the server says the subscription is complete.
-    first.send({ type: "unsubscribe", id: "a" });
-    expect((await first.until(5))[4]).toEqual({ type: "complete", id: "a" });
-    expect(api.unsubscribed).toBe(1);
-    // Closing the connection unsubscribes too.
+    // Unsubscribing the last topic stops the frames; closing the connection does too.
+    first.send({ type: "unsubscribe", topics: ["chain-api.heights"] });
+    expect((await first.until(4))[3]).toEqual({ type: "unsubscribed", topics: [] });
+    expect(process.api.topics.subscriberCount).toBe(1);
     await second.close();
-    await eventually(() => api.unsubscribed === 2);
-    expect(api.listeners.size).toBe(0);
+    await eventually(() => process.api.topics.subscriberCount === 0);
 
     const third = await Client.connect(process.ws);
-    third.send({ type: "subscribe", id: "c", name: "heights" });
-    await third.until(1);
+    third.send(subscribe);
+    expect(await third.until(1)).toEqual([{ type: "subscribed", topics: ["chain-api.heights"], height: "2" }]);
     source.finalize(3n);
     await runLoop(process, source, 3n);
-    // The loop run again at cursor 2 delivers 2's on-after-db-write again first, then goes on at 3.
-    expect((await third.until(3)).slice(1)).toEqual([notified(2, "c"), notified(3, "c")]);
-    expect(first.messages).toHaveLength(5);
+    // The loop run again at cursor 2 re-delivers 2's commit first; the bus sent 2 already, so only 3 follows.
+    expect((await third.until(2)).slice(1)).toEqual([frame(3)]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(third.messages).toHaveLength(2);
+    expect(first.messages).toHaveLength(4);
     await first.close();
     await third.close();
   }, 120_000);
 
-  it("passes the duplicate checks: duplicate-api-route for a route or a subscription name, before anything listens", async () => {
+  it("passes the duplicate checks: duplicate-api-route for a route, before anything listens", async () => {
     expect(await duplicateProblems(async () => (await backend.database()).db)).toEqual([]);
   }, 120_000);
 
   it("negative control: a registry that accepts a duplicate route fails the duplicate checks", async () => {
     const problems = await duplicateProblems(async () => (await backend.database()).db, () => new AcceptsDuplicates());
-    expect(problems).toEqual(["http: started", "subscription: started"]);
+    expect(problems).toEqual(["http: started"]);
   }, 120_000);
 
   it("negative control: a module API that adds the envelope's headers, or a GraphQL body's extensions, fails the 'as the module wrote it'", async () => {
@@ -858,6 +844,30 @@ const FAKE_DB = {
   },
 };
 
+const S = defineTopic("s", z.unknown());
+const SERVED = { id: "m", topics: [S] } as unknown as ModuleDeclaration;
+const SUBSCRIBE_S = { type: "subscribe", topics: ["m.s"] };
+
+/** Module `m`'s topic `s` on a bus at height 0: `held` stages the next height and returns its commit, `send` both. */
+function topicBus() {
+  const bus = new TopicBus([SERVED], 0n);
+  let height = 0n;
+  const held = async (value: unknown): Promise<() => void> => {
+    const block = { height: ++height, hash: Uint8Array.of(1) };
+    await bus.collect(SERVED, block.height, async (sink) => sink.emit(S, value), () => undefined);
+    return () => bus.committed(block);
+  };
+  return { bus, held, send: async (value: unknown) => (await held(value))() };
+}
+
+/** The frame of height `height` carrying `value` on `m.s`. */
+const frameOf = (height: number, value: unknown) => ({
+  type: "height",
+  height: String(height),
+  hash: "0x01",
+  messages: [{ topic: "m.s", value }],
+});
+
 /** The routes of module `m` registered by `register`. */
 function routesOf(register: (api: ApiRegistry) => void): ApiRoutes {
   const routes = new ApiRoutes();
@@ -874,9 +884,15 @@ describe("the module API server without a database", () => {
     register: (api: ApiRegistry) => void,
     options: Parameters<typeof listenModuleApi>[2] = {},
     onError?: (error: unknown) => void,
+    topics?: TopicBus,
   ) => {
     const server = await listenModuleApi(
-      new ModuleApi(routesOf(register), { db: FAKE_DB, timeoutMs: 1_000, ...(onError === undefined ? {} : { onError }) }),
+      new ModuleApi(routesOf(register), {
+        db: FAKE_DB,
+        timeoutMs: 1_000,
+        ...(onError === undefined ? {} : { onError }),
+        ...(topics === undefined ? {} : { topics }),
+      }),
       "127.0.0.1:0",
       options,
     );
@@ -1009,167 +1025,139 @@ describe("the module API server without a database", () => {
     expect(errors).toHaveLength(1);
   });
 
-  it("speaks the subscription protocol: acks, errors for what it cannot do, completes on unsubscribe", async () => {
-    let emit: ((value: unknown) => void) | undefined;
-    const { ws } = await serve((api) => {
-      api.subscription("s", (_args, e) => {
-        emit = e;
-        return () => undefined;
-      });
-      api.subscription("throws", () => {
-        throw new Error("secret detail");
-      });
-    });
+  it("speaks the subscription protocol: acks with the height, errors for what it cannot do, frames per height", async () => {
+    const topics = topicBus();
+    const { ws } = await serve(() => undefined, {}, undefined, topics.bus);
     const client = await Client.connect(`${ws}/any/path`);
     client.send("{not json");
     client.send({ type: "dance" });
-    client.send({ type: "subscribe", id: 7, name: "s" });
-    client.send({ type: "subscribe", id: "", name: "s" });
-    client.send({ type: "subscribe", id: "x".repeat(129), name: "s" });
-    client.send({ type: "subscribe", id: "n", name: 5 });
-    client.send({ type: "subscribe", id: "x", name: "nothing" });
-    client.send({ type: "subscribe", id: "x", name: "throws" });
-    client.send({ type: "subscribe", id: "1", name: "s" });
-    client.send({ type: "subscribe", id: "1", name: "s" });
-    client.send({ type: "unsubscribe", id: "unknown" });
-    client.send({ type: "unsubscribe", id: 5 });
+    client.send({ type: "subscribe" });
+    client.send({ type: "subscribe", topics: "m.s" });
+    client.send({ type: "subscribe", topics: [5] });
+    client.send({ type: "subscribe", topics: ["m.s", "m.nothing"] });
+    client.send(SUBSCRIBE_S);
+    client.send(SUBSCRIBE_S);
+    client.send({ type: "unsubscribe", topics: ["m.other"] });
     client.socket.send(Buffer.from([1, 2]), { binary: true });
-    const invalid = (message: string, id?: string) => ({
-      type: "error",
-      ...(id === undefined ? {} : { id }),
-      error: { code: "invalid-request", message },
-    });
-    const malformed = invalid("a subscribe message has an id, a string of 1 to 128 characters, and a name, a string");
-    expect(await client.until(13)).toEqual([
+    const invalid = (message: string) => ({ type: "error", error: { code: "invalid-request", message } });
+    const malformed = invalid("subscribe takes topics, a list of strings");
+    const subscribed = (height: string) => ({ type: "subscribed", topics: ["m.s"], height });
+    expect(await client.until(10)).toEqual([
       invalid("a message is a JSON object with a type"),
       invalid("a message's type is subscribe or unsubscribe"),
       malformed,
       malformed,
       malformed,
-      malformed,
-      { type: "error", id: "x", error: { code: "not-found", message: "no subscription is named nothing" } },
-      { type: "error", id: "x", error: { code: "internal-error", message: "the subscription throws could not be opened" } },
-      { type: "subscribed", id: "1" },
-      invalid("the subscription 1 is open already", "1"),
-      invalid("no subscription unknown is open", "unknown"),
-      invalid("no subscription 5 is open"),
+      { type: "error", error: { code: "not-found", message: "no topic is named m.nothing" } },
+      subscribed("0"),
+      subscribed("0"),
+      { type: "unsubscribed", topics: ["m.s"] },
       invalid("a message is a JSON object with a type"),
     ]);
-    emit?.({ big: 2n ** 70n, bytes: Uint8Array.of(1) });
-    expect((await client.until(14))[13]).toEqual({ type: "next", id: "1", value: { big: "1180591620717411303424", bytes: "0x01" } });
-    client.send({ type: "unsubscribe", id: "1" });
-    expect((await client.until(15))[14]).toEqual({ type: "complete", id: "1" });
-    // After the unsubscribe the emit sends nothing.
-    emit?.(1);
-    client.send({ type: "subscribe", id: "1", name: "s" });
-    expect((await client.until(16))[15]).toEqual({ type: "subscribed", id: "1" });
-    // An id of 128 characters is one.
-    const long = "y".repeat(128);
-    client.send({ type: "subscribe", id: long, name: "s" });
-    expect((await client.until(17))[16]).toEqual({ type: "subscribed", id: long });
+    await topics.send({ big: 2n ** 70n, bytes: Uint8Array.of(1) });
+    expect((await client.until(11))[10]).toEqual(frameOf(1, { big: "1180591620717411303424", bytes: "0x01" }));
+    client.send({ type: "unsubscribe", topics: ["m.s"] });
+    expect((await client.until(12))[11]).toEqual({ type: "unsubscribed", topics: [] });
+    // With no topic left the frames stop; subscribing again acks the height it missed.
+    await topics.send(1);
+    client.send(SUBSCRIBE_S);
+    expect((await client.until(13))[12]).toEqual(subscribed("2"));
+    await topics.send("x");
+    expect((await client.until(14))[13]).toEqual(frameOf(3, "x"));
+    // A heights-only subscription: an empty frame per height, until an empty unsubscribe stops it.
+    const heights = await Client.connect(ws);
+    heights.send({ type: "subscribe", topics: [] });
+    expect(await heights.until(1)).toEqual([{ type: "subscribed", topics: [], height: "3" }]);
+    await topics.send("y");
+    expect((await heights.until(2))[1]).toEqual({ ...frameOf(4, "y"), messages: [] });
+    heights.send({ type: "unsubscribe", topics: [] });
+    expect((await heights.until(3))[2]).toEqual({ type: "unsubscribed", topics: [] });
+    await topics.send("z");
+    expect((await client.until(16)).slice(14)).toEqual([frameOf(4, "y"), frameOf(5, "z")]);
+    expect(heights.messages).toHaveLength(3);
+    await heights.close();
     await client.close();
   });
 
-  it("closes a connection whose message is over the limit (1009), unsubscribing it, and serves the next", async () => {
-    let unsubscribed = 0;
-    const { ws } = await serve(
-      (api) =>
-        api.subscription("s", () => () => {
-          unsubscribed++;
-        }),
-      { maxMessageBytes: 256 },
-    );
+  it("closes a connection whose message is over the limit (1009), detaching it, and serves the next", async () => {
+    const topics = topicBus();
+    const { ws } = await serve(() => undefined, { maxMessageBytes: 256 }, undefined, topics.bus);
     const client = await Client.connect(ws);
-    client.send({ type: "subscribe", id: "1", name: "s" });
+    client.send(SUBSCRIBE_S);
     await client.until(1);
     const closed = once(client.socket, "close");
-    client.send({ type: "subscribe", id: "2", name: "s", args: "x".repeat(1_000) });
+    client.send({ type: "subscribe", topics: ["x".repeat(1_000)] });
     const [code] = (await closed) as [number];
     expect(code).toBe(1009);
-    await eventually(() => unsubscribed === 1);
+    await eventually(() => topics.bus.subscriberCount === 0);
     const next = await Client.connect(ws);
-    next.send({ type: "subscribe", id: "1", name: "s" });
-    expect(await next.until(1)).toEqual([{ type: "subscribed", id: "1" }]);
+    next.send(SUBSCRIBE_S);
+    expect(await next.until(1)).toEqual([{ type: "subscribed", topics: ["m.s"], height: "0" }]);
     await next.close();
   });
 
-  it("throws at the module's emit for a value it cannot write, and keeps the subscription", async () => {
-    let emit: ((value: unknown) => void) | undefined;
-    const { ws } = await serve((api) =>
-      api.subscription("s", (_args, e) => {
-        emit = e;
-        return () => undefined;
-      }),
-    );
+  it("refuses at the emit a value JSON cannot carry, failing that height only, and keeps the subscription", async () => {
+    const topics = topicBus();
+    const { ws } = await serve(() => undefined, {}, undefined, topics.bus);
     const client = await Client.connect(ws);
-    client.send({ type: "subscribe", id: "1", name: "s" });
+    client.send(SUBSCRIBE_S);
     await client.until(1);
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    expect(() => emit?.(cyclic)).toThrow(TypeError);
-    emit?.("fine");
-    expect((await client.until(2))[1]).toEqual({ type: "next", id: "1", value: "fine" });
+    await expect(topics.send(cyclic)).rejects.toThrow(/JSON cannot carry/);
+    await topics.send("fine");
+    expect((await client.until(2))[1]).toEqual(frameOf(2, "fine"));
     await client.close();
   });
 
-  it("disconnects a subscriber that falls behind, never making the emitter wait, and unsubscribes it", async () => {
-    let emit: ((value: unknown) => void) | undefined;
-    let unsubscribed = 0;
-    const { ws } = await serve(
-      (api) =>
-        api.subscription("s", (_args, e) => {
-          emit = e;
-          return () => {
-            unsubscribed++;
-          };
-        }),
-    );
+  it("disconnects a subscriber that falls behind, never making the commit wait, and detaches it", async () => {
+    const topics = topicBus();
+    const { ws } = await serve(() => undefined, {}, undefined, topics.bus);
     const slow = await Client.connect(ws);
-    slow.send({ type: "subscribe", id: "1", name: "s" });
+    slow.send(SUBSCRIBE_S);
     await slow.until(1);
     // The client stops reading: what the server sends piles up in its buffer.
     (slow.socket as unknown as { _socket: Socket })._socket.pause();
     const value = "x".repeat(256 * 1024);
     let longest = 0;
-    for (let index = 0; index < 400 && unsubscribed === 0; index++) {
+    for (let index = 0; index < 400 && topics.bus.subscriberCount > 0; index++) {
+      const commit = await topics.held(value);
       const at = performance.now();
-      emit?.(value);
+      commit();
       longest = Math.max(longest, performance.now() - at);
       await new Promise((resolve) => setImmediate(resolve));
     }
-    expect(unsubscribed).toBe(1);
+    expect(topics.bus.subscriberCount).toBe(0);
     expect(longest).toBeLessThan(250);
-    // Once disconnected, the emit is a no-op.
-    expect(() => emit?.(value)).not.toThrow();
+    // Once detached, a commit sends it nothing.
+    await expect(topics.send(value)).resolves.toBeUndefined();
     (slow.socket as unknown as { _socket: Socket })._socket.resume();
     await eventually(() => slow.socket.readyState === WebSocket.CLOSED);
   });
 
-  it("closes: every WebSocket connection ends, its subscriptions are unsubscribed, and nothing listens", async () => {
-    let unsubscribed = 0;
+  it("closes: every WebSocket connection ends, detached from the bus, and nothing listens", async () => {
+    const topics = topicBus();
     const server = await listenModuleApi(
       new ModuleApi(
-        routesOf((api) => {
-          api.subscription("s", () => () => {
-            unsubscribed++;
-          });
-          api.http("GET", "/x", ok);
-        }),
-        { db: FAKE_DB, timeoutMs: 1 },
+        routesOf((api) => api.http("GET", "/x", ok)),
+        { db: FAKE_DB, timeoutMs: 1, topics: topics.bus },
       ),
       "127.0.0.1:0",
     );
     const client = await Client.connect(`ws://127.0.0.1:${server.port}`);
-    client.send({ type: "subscribe", id: "1", name: "s" });
-    client.send({ type: "subscribe", id: "2", name: "s" });
-    await client.until(2);
+    const other = await Client.connect(`ws://127.0.0.1:${server.port}`);
+    client.send(SUBSCRIBE_S);
+    other.send(SUBSCRIBE_S);
+    await client.until(1);
+    await other.until(1);
+    expect(topics.bus.subscriberCount).toBe(2);
     const keepAlive = await fetch(`http://127.0.0.1:${server.port}/x`);
     expect(keepAlive.status).toBe(200);
     const closed = once(client.socket, "close");
     await server.close();
     const [code] = (await closed) as [number];
     expect(code).toBe(1001);
-    expect(unsubscribed).toBe(2);
+    expect(topics.bus.subscriberCount).toBe(0);
     expect(await listening(server.port)).toBe(false);
     await server.close();
   });
@@ -1203,14 +1191,11 @@ describe("the module API server without a database", () => {
 
   it("disconnects, when it closes, a client that does not answer the close, after CLOSE_TIMEOUT_MS", async () => {
     const server = await listenModuleApi(
-      new ModuleApi(
-        routesOf((api) => api.subscription("s", () => () => undefined)),
-        { db: FAKE_DB, timeoutMs: 1 },
-      ),
+      new ModuleApi(routesOf(() => undefined), { db: FAKE_DB, timeoutMs: 1, topics: topicBus().bus }),
       "127.0.0.1:0",
     );
     const client = await Client.connect(`ws://127.0.0.1:${server.port}`);
-    client.send({ type: "subscribe", id: "1", name: "s" });
+    client.send(SUBSCRIBE_S);
     await client.until(1);
     // The client stops reading, so it never sees the close frame nor answers it.
     (client.socket as unknown as { _socket: Socket })._socket.pause();
@@ -1409,7 +1394,7 @@ describe("the module API server without a database", () => {
   });
 
   it("sets X-Umbra-Version on the subscription's upgrade and on ws's refusals of an upgrade it cannot complete", async () => {
-    const { server, ws } = await serve((api) => api.subscription("s", () => () => undefined));
+    const { server, ws } = await serve(() => undefined);
     const socket = new WebSocket(ws);
     const opened = once(socket, "open");
     const [upgrade] = (await once(socket, "upgrade")) as [IncomingMessage];

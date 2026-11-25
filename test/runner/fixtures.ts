@@ -10,6 +10,7 @@ import type {
   Revision,
 } from "../../src/modules/declaration.js";
 import { isBackbonePart, type PointArguments, type PointRun } from "../../src/runner/dispatch.js";
+import { NO_TOPICS } from "../helpers/topic-sink.js";
 
 /**
  * What the runner's dispatch tests share: a recorder of callbacks starting and ending (its event list is the logical
@@ -103,7 +104,7 @@ export const SINK: ItemSink = Object.freeze({ put: () => undefined });
 export const READ: ReadHandle = Object.freeze({ height: 0n, query: async () => [] });
 export const WRITE: BlockWriteHandle = Object.freeze({ height: 0n, query: async () => [], execute: async () => 0 });
 const HEADER: BlockHeader = Object.freeze({ height: 2n, hash: HASH, parentHash: HASH });
-const API: ApiRegistry = Object.freeze({ route: () => undefined, binaryRoute: () => undefined, http: () => undefined, subscription: () => undefined });
+const API: ApiRegistry = Object.freeze({ route: () => undefined, binaryRoute: () => undefined, http: () => undefined });
 
 /** Stand-in arguments of every point, after the process context (`PointCallbacks`). */
 export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Object.freeze({
@@ -116,7 +117,7 @@ export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Objec
   "on-finalized": [{ height: 1n, hash: HASH }, READ],
   "on-start-height": [{ entryId: "m", height: 1n }, READ],
   "on-compute": [BLOCK, READ, SINK],
-  "on-db-write": [BLOCK, WRITE],
+  "on-db-write": [BLOCK, WRITE, NO_TOPICS],
   "on-settle": [{ first: 1n, last: 1n }, WRITE],
   "on-after-db-write": [BLOCK, READ],
   "on-stop-height": [{ entryId: "m", height: 1n }, READ],

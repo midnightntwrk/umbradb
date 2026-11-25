@@ -14,6 +14,7 @@ import { standInItems } from "../backbone/block-fetch-stand-in.js";
 import type { TestBackend, TestDatabase } from "../db/backends.js";
 import { declaration } from "../modules/declarations.js";
 import { Contexts } from "../runner/fixtures.js";
+import { NO_TOPICS } from "./topic-sink.js";
 
 /**
  * What the cursor-table helper's tests share.
@@ -173,7 +174,7 @@ export async function helperDatabase(
           height: committed,
           ...(options.onClosedUse === undefined ? {} : { onClosedUse: options.onClosedUse }),
         });
-        await writes.write(CORE_BLOCK_COMMIT.id, (w) => commitRow(contexts.of(CORE_BLOCK_COMMIT.id), b, w));
+        await writes.write(CORE_BLOCK_COMMIT.id, (w) => commitRow(contexts.of(CORE_BLOCK_COMMIT.id), b, w, NO_TOPICS));
         await writes.write(part, (w) => body(w, b));
         const run = Object.freeze({ first: height, last: height });
         await writes.write(CORE_DIGEST.id, (w) => digest(contexts.of(CORE_DIGEST.id), run, w), "on-settle");

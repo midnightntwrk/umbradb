@@ -341,6 +341,8 @@ import {
   refuseNotServing,
 } from "./api-answers.js";
 import { type FetchHandler, type MountedApiSeams, type StartedModuleApi, startModuleApi } from "./api-server.js";
+import { TopicBus } from "./topic-bus.js";
+import { followAll } from "./transaction-follower.js";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
 import {
   addressText,
@@ -2191,7 +2193,13 @@ class Process implements ProcessHandle {
     this.#step();
     // The module API's listener where the plan puts it; otherwise none, a host mounting its handlers.
     const address = network.api.mode === "listening" ? network.api.address.text : undefined;
+    const running = new Set(graph.ranges.flatMap((range) => range.order.map((part) => part.id)));
+    const topics = new TopicBus(
+      graph.modules.filter((part) => running.has(part.id)),
+      cursor?.height ?? null,
+    );
     this.#api = await startModuleApi({
+      topics,
       graph,
       contexts,
       db,
@@ -2218,7 +2226,9 @@ class Process implements ProcessHandle {
       ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
       pause: this.#pauses,
       // The ledger worker's host follows each block's transaction: it commits in the worker the blocks applied there.
-      ...(this.#ledger === undefined ? {} : { follower: this.#ledger }),
+      // The topic bus follows them too: it sends each height's frame once the height commits.
+      follower: followAll(this.#ledger, topics),
+      topics,
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {

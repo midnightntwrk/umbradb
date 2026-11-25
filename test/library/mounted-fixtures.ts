@@ -4,7 +4,9 @@ import type { Socket } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { WebSocket } from "ws";
+import { bigintText } from "../../src/helpers/bigint-text.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
+import { defineTopic } from "../../src/modules/topic.js";
 import type { NodeHttpHandler, NodeUpgradeHandler } from "../../src/runner/api-answers.js";
 import { readChainDataView } from "../../src/runner/envelope.js";
 import type { Gate } from "../admin/admin-harness.js";
@@ -193,10 +195,10 @@ export class Client {
   }
 }
 
-/** What `mapi` gives the test: the subscribers' emits, and the holds and failures it was built with. */
+/** What `mapi` is built with: its holds and failures, and the padding of what it emits to `feed`. */
 export interface MapiHooks {
-  /** Every open subscription of `feed`'s emit. */
-  readonly emits: Set<(value: unknown) => void>;
+  /** Text added to each height's `feed` message while set: large frames for a slow-subscriber check. */
+  readonly pad?: { value?: string };
   /** A gate its `on-start-db` waits at, once. */
   readonly startDb?: Gate;
   /** What its `on-start-db` throws (a class-B refusal, `callback-error`). */
@@ -212,13 +214,16 @@ export interface MapiHooks {
   readonly haltAt?: bigint;
   /** The message of the error `/fails` throws and the halt's (a careless one may hold a secret). */
   readonly failure?: string;
-  /** Told each height once its `on-after-db-write` emitted to `feed`'s subscribers (none unless given). */
+  /** Told each height once its `on-after-db-write` ran (none unless given). */
   readonly afterWrite?: (height: bigint) => void;
 }
 
+/** `mapi`'s topic, served as `mapi.feed`. */
+export const MAPI_FEED = defineTopic("feed", z.object({ height: bigintText(), pad: z.string().optional() }));
+
 /**
- * The user module `mapi` (see {@link MapiHooks}): it stores each height in `mapi.rows` and emits it to `feed`'s
- * subscribers from `on-after-db-write`. Its routes:
+ * The user module `mapi` (see {@link MapiHooks}): it stores each height in `mapi.rows` and emits it to its topic
+ * `feed` from `on-db-write`. Its routes:
  * - `GET /rows`: the read's height and the rows it sees;
  * - `GET /view`: the chain-data view (`readChainDataView`), which before block S fails `no-committed-height`, uncaught;
  * - `GET /own-503`: the module's own 503;
@@ -240,6 +245,7 @@ export function mapiModule(hooks: MapiHooks): ModuleDeclaration {
     startsMidChain: true,
     configSchema: z.object({}),
     migrations: [{ id: "001", sql: "CREATE TABLE mapi.rows (height bigint PRIMARY KEY)" }],
+    topics: [MAPI_FEED],
     points: {
       async "on-start-db"() {
         await startDb?.wait();
@@ -248,13 +254,14 @@ export function mapiModule(hooks: MapiHooks): ModuleDeclaration {
       async "on-parse"(_p, b) {
         await parses.get(b.height)?.wait();
       },
-      async "on-db-write"(_p, b, w) {
+      async "on-db-write"(_p, b, w, topics) {
         await writes.get(b.height)?.wait();
         if (hooks.haltAt === b.height) throw new Error(hooks.failure ?? "mapi halts");
         await w.execute("INSERT INTO mapi.rows (height) VALUES ($1)", [b.height]);
+        const pad = hooks.pad?.value;
+        topics.emit(MAPI_FEED, pad === undefined ? { height: b.height } : { height: b.height, pad });
       },
       async "on-after-db-write"(_p, b) {
-        for (const emit of hooks.emits) emit({ height: b.height });
         hooks.afterWrite?.(b.height);
       },
       async "on-start-api"(_p, api) {
@@ -277,10 +284,6 @@ export function mapiModule(hooks: MapiHooks): ModuleDeclaration {
         });
         api.http("GET", "/fails", async () => {
           throw new Error(hooks.failure ?? "mapi fails");
-        });
-        api.subscription("feed", (_args, emit) => {
-          hooks.emits.add(emit);
-          return () => hooks.emits.delete(emit);
         });
       },
     },
