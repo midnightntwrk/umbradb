@@ -54,13 +54,11 @@ tooling only — never shipped in the runtime path.
 | `@types/node` | `^26.1.1` → **26.1.1** | range → locked | registry.npmjs.org | `sha512-nxAkRSVk…GgZREw==` | MIT | Node type definitions (matches Node ≥24) | DefinitelyTyped |
 | `effect` | **3.22.0** | exact (no caret) | registry.npmjs.org | `sha512-jhYFe0zT…SPNz3g==` | MIT | Functional-effect utilities in test/harness code | effect releases |
 | `fast-check` | `^4.9.0` → **4.9.0** | range → locked | registry.npmjs.org | `sha512-7ms6T7Sy…PCllg==` | MIT | Property-based testing (P1–P10 properties) | fast-check releases |
-| `swagger-ui-dist` | **5.35.0** | exact (no caret) | registry.npmjs.org | `sha512-U06rpMtW…8yVUQ==` | Apache-2.0 | Source of the vendored Swagger UI (§10); never a runtime dependency, since it pulls in `@scarf/scarf`'s install-time telemetry script | swagger-ui releases / advisories |
 | `@midnightntwrk/wallet-sdk-abstractions` | **3.0.0-canary.20260716150734-e744d99** | exact canary build | registry.npmjs.org | `sha512-8oJ+0o09…7LDLw==` | Apache-2.0 | Wallet-state type/shape reference for test fixtures; test-only per the indexer-agnostic boundary | Midnight SDK — canary, watch closely |
 
-> **Install scripts.** 6 of the 331 packages declare an install/lifecycle script — all in the
+> **Install scripts.** 5 of the 329 packages declare an install/lifecycle script — all in the
 > **dev/optional** toolchain, **none in the runtime (`@electric-sql/pglite`, `postgres`,
-> `typescript`, `ws`, `zod`) tree**: `esbuild@0.28.2`, `protobufjs@7.6.5`, `ssh2@1.17.0`, `@scarf/scarf@1.4.0`
-> (telemetry, via `swagger-ui-dist`), and the optional
+> `typescript`, `ws`, `zod`) tree**: `esbuild@0.28.2`, `protobufjs@7.6.5`, `ssh2@1.17.0`, and the optional
 > `cpu-features@0.0.10` + `fsevents@2.3.3` (darwin-only). This corrects the "zero install scripts"
 > phrasing of the security-posture change's design: the lockfile flags five.
 > The planned G18 `.npmrc` `ignore-scripts=true` neutralizes all of them (and any future one)
@@ -203,18 +201,21 @@ commits).
 | `wasm-bindgen-cli` (in the image) | 0.2.108 | exact version, `cargo install --locked` | crates.io | JavaScript bindings (the version ledger-9.1.0.0-rc.5 and ledger-9.1.0.1 pin; the v8 and v9-rc3 patches move ledger-8.1.2 and ledger-9.1.0.0-rc.3 from 0.2.104, whose output varies from run to run, to it) | wasm-bindgen releases |
 | binaryen `wasm-opt` (in the image) | `version_133` | release tarball SHA-256 (`x86_64` `2dc9c781…7489`, `aarch64` `89c07ea5…9bf8`) | github.com/WebAssembly/binaryen releases | Size optimization (`-Os`), as upstream's release recipe | binaryen releases |
 
-## 10. Vendored Swagger UI (`vendor/swagger-ui/`)
+## 10. Vendored API documentation UIs (`vendor/swagger-ui/`, `vendor/asyncapi-react/`)
 
-Source: `vendor/swagger-ui/upstream.json`, `vendor/swagger-ui/SHA256SUMS`. The browser bundle, stylesheet and license
-files of the `swagger-ui-dist` devDependency (§2), copied by `npm run vendor:swagger-ui` and served at `/docs` when
-`apiDocs` is `"ui"`. These are **runtime** artifacts shipped in the npm package, outside `npm audit`'s scope.
-`.github/workflows/supply-chain.yml` runs `npm run vendor:swagger-ui:check`, which fails when the vendored files differ
-from the installed package or from `SHA256SUMS`, or when package.json, the lockfile and `upstream.json` disagree on the
-version. Bump the devDependency and run `npm run vendor:swagger-ui` together.
+Source: `scripts/vendor-web-ui.mjs`, and each directory's `upstream.json` and `SHA256SUMS`. The prebuilt browser
+bundles, stylesheets and license files of two npm packages, served at `/docs` and `/docs/events` when `apiDocs` is
+`"ui"`. Neither package is a dependency: `npm run vendor:web-ui` fetches only each package's own tarball (`npm pack`,
+no dependencies, no scripts), refuses one whose sha512 is not the pinned integrity, and copies the listed files out of
+it. `.github/workflows/supply-chain.yml` runs `npm run vendor:web-ui:check`, which vendors again into a temporary
+directory and fails on any difference from the committed files. These are **runtime** artifacts shipped in the npm
+package, outside `npm audit`'s scope. To update one, change its version and integrity in the script and run
+`npm run vendor:web-ui`.
 
 | Component | Version/Pin | Pinning | Source | Purpose | Update-watch |
 |---|---|---|---|---|---|
-| Swagger UI (`swagger-ui-bundle.js`, `swagger-ui.css`) | **5.35.0** | exact devDependency + lockfile `sha512`; files SHA-256 | registry.npmjs.org (`swagger-ui-dist`) | Interactive module API documentation (`apiDocs: "ui"`) | swagger-ui releases / advisories |
+| Swagger UI (`swagger-ui-bundle.js`, `swagger-ui.css`) | **5.35.0** | tarball `sha512-U06rpMtW…8yVUQ==`; files SHA-256 | registry.npmjs.org (`swagger-ui-dist`, Apache-2.0) | Interactive documentation of the HTTP routes (`/docs`) | swagger-ui releases / advisories |
+| AsyncAPI React standalone (`asyncapi-standalone.js`, `asyncapi.css`) | **3.2.3** | tarball `sha512-/hnh4xIK…/QUKGw==`; files SHA-256 | registry.npmjs.org (`@asyncapi/react-component`, Apache-2.0) | Documentation of the WebSocket topics (`/docs/events`) | asyncapi-react releases / advisories |
 
 ## License summary
 

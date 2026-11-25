@@ -580,8 +580,9 @@ counts and queue (after a restart, for one).
   - **Handler:** `handle(input, { read, height, hash })`. Every answer is read at one committed height, `height`, whose
     block hash is `hash` (`0x` hex text). Before the first block commits, the route answers 503 `no-committed-height` without calling
     you.
-  - **Documentation:** with the core setting `apiDocs: "openapi"`, `GET /openapi.json` on the module API is an
-    OpenAPI 3.1 document of every route, built from your schemas; `"ui"` also serves Swagger UI at `/docs`.
+  - **Documentation:** with the core setting `apiDocs: "spec"`, `GET /openapi.json` on the module API is an
+    OpenAPI 3.1 document of every route, and `GET /asyncapi.json` an AsyncAPI 3.0 document of every topic, built from
+    your schemas; `"ui"` also serves Swagger UI at `/docs` and AsyncAPI's renderer at `/docs/events`.
     `description` becomes the operation's summary, and `.describe("…")` or `.meta({ examples })` on a field shows up
     beside it. Raw `api.http` handlers are left out, and no module may register the paths the setting serves.
   - **Errors:** throw `new RouteError(kind, code, message)` to refuse a request. `kind` says what went wrong in terms
@@ -664,8 +665,9 @@ counts and queue (after a restart, for one).
 - **Stating the height you read.** `answerChainData(read, answer)` as in §2.4. For other shapes:
   `readChainDataView(read)` gives `{ view, height, hash }`, `chainDataHeaders(view)` the three headers, and
   `withViewExtensions(body, view)` puts them in a GraphQL response's `extensions`, its `data` unchanged.
-- **Topics**, for live updates. Declare each with `defineTopic(name, schema)` in the module's `topics` (a name in
-  lowerCamelCase; a schema under a route output's rules), and emit to it from `on-db-write` with
+- **Topics**, for live updates. Declare each with `defineTopic(name, schema, { description? })` in the module's
+  `topics` (a name in lowerCamelCase; a schema under a route output's rules; one sentence the API's documentation
+  shows), and emit to it from `on-db-write` with
   `topics.emit(topic, value)`. The value is checked and written by the schema at the call, so a value it refuses fails
   the height whether or not anyone subscribes. What a height emits is sent once it commits, and dropped if it does not.
   Subscribers name a topic `<module-id>.<name>`, and get one frame per committed height, in order: every module's

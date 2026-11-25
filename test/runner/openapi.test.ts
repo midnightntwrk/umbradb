@@ -15,7 +15,7 @@ const HASH = new Uint8Array(32).fill(0xab);
 const Tree: z.ZodType<{ name: string; children: unknown[] }> = z.object({ name: z.string(), get children(): any { return z.array(Tree); } });
 const TREE = { name: "a", children: [{ name: "b", children: [] }] };
 
-function apiOf(register: (api: ApiRegistry) => void, { docs = "openapi", read }: { docs?: ApiDocs; read?: () => never } = {}) {
+function apiOf(register: (api: ApiRegistry) => void, { docs = "spec", read }: { docs?: ApiDocs; read?: () => never } = {}) {
   const routes = new ApiRoutes({ docs });
   const registration = routes.open("m");
   register(registration.registry);
@@ -144,10 +144,12 @@ describe("apiDocs", () => {
     expect(JSON.parse(response.body as string)).toEqual({ mine: true });
   });
 
-  it("openapi serves the document but not the UI", async () => {
-    const api = apiOf(routesOf, { docs: "openapi" });
+  it("spec serves the documents but not the UIs, and the document links no page", async () => {
+    const api = apiOf(routesOf, { docs: "spec" });
+    expect((await api.answer({ method: "GET", path: "/asyncapi.json" })).status).toBe(200);
     expect((await api.answer({ method: "GET", path: "/docs" })).status).toBe(404);
-    expect(() => apiOf(raw("/docs"), { docs: "openapi" })).not.toThrow();
+    expect((await documentOf(api)).info.description).toBeUndefined();
+    expect(() => apiOf(raw("/docs"), { docs: "spec" })).not.toThrow();
   });
 
   it("ui serves a page under a CSP without inline script, its initializer and the vendored Swagger UI", async () => {
@@ -162,6 +164,20 @@ describe("apiDocs", () => {
     }
     const bundle = await api.answer({ method: "GET", path: "/docs/swagger-ui-bundle.js" });
     expect(Buffer.from(bundle.body as Uint8Array).toString("utf8")).toContain("SwaggerUIBundle");
+    expect((await documentOf(api)).info.description).toContain("(docs/events)");
+  });
+
+  it("ui serves the topics' page, its initializer and the vendored AsyncAPI renderer", async () => {
+    const api = apiOf(routesOf, { docs: "ui" });
+    const page = await api.answer({ method: "GET", path: "/docs/events" });
+    expect(page.headers["content-type"]).toMatch(/^text\/html/);
+    expect(page.body as string).not.toMatch(/<script>/);
+    for (const asset of ["/docs/events.js", "/docs/asyncapi-standalone.js", "/docs/asyncapi.css"]) {
+      const response = await api.answer({ method: "GET", path: asset });
+      expect([asset, response.status]).toEqual([asset, 200]);
+    }
+    const bundle = await api.answer({ method: "GET", path: "/docs/asyncapi-standalone.js" });
+    expect(Buffer.from(bundle.body as Uint8Array).toString("utf8")).toContain("AsyncApiStandalone");
   });
 
   it("ui reserves the UI's paths", () => {

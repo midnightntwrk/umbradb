@@ -55,8 +55,8 @@
  *   fixed message, so no exception text, which may hold a credential, reaches a client. The error itself goes to
  *   `onError`.
  *
- * **Documentation.** With `apiDocs` on, the module API answers the paths of `./api-docs.ts` (the OpenAPI document, and
- * Swagger UI) without a read. No module may register them.
+ * **Documentation.** With `apiDocs` on, the module API answers the paths of `./api-docs.ts` (the OpenAPI and AsyncAPI
+ * documents, and their UIs) without a read. No module may register them.
  *
  * **Topics** are not registered here: modules declare them, and {@link ModuleApi.topics} is the process's bus
  * (`./topic-bus.ts`), which the subscription protocol (`./api-session.ts`) serves.
@@ -337,9 +337,9 @@ export class ModuleApi {
 
   constructor(routes: ApiRoutes, options: ModuleApiOptions) {
     this.#http = routes.http;
-    this.#docs = new DocsAnswers(routes.docs, routes.routes);
-    this.#options = options;
     this.topics = options.topics ?? new TopicBus();
+    this.#docs = new DocsAnswers(routes.docs, routes.routes, this.topics.declared);
+    this.#options = options;
   }
 
   /** Answers `request` (see the module comment); never rejects. */

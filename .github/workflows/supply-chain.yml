@@ -70,8 +70,8 @@ jobs:
         # the build needs; this step is the standing confirmation of that.
         run: npm run typecheck
 
-      - name: Vendored Swagger UI matches the pinned swagger-ui-dist
-        run: npm run vendor:swagger-ui:check
+      - name: Vendored API docs UIs match their pinned tarballs
+        run: npm run vendor:web-ui:check
 
       - name: npm audit -- blocking, runtime dependencies only (G18 D3)
         # Runtime deps are exactly `@electric-sql/pglite`, `postgres`, `typescript`, `ws` + `zod`

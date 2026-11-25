@@ -101,7 +101,7 @@ const TABLE_PROPERTIES = ["schema", "tables", "kind", "deterministic", "contentD
 const CONTENT_PROPERTIES = ["tables", "content"];
 const MIGRATION_PROPERTIES = ["id", "sql"];
 const TASK_PROPERTIES = ["name", "needsState", "run"];
-const TOPIC_PROPERTIES = ["name", "schema"];
+const TOPIC_PROPERTIES = ["name", "schema", "description"];
 /** A topic's name: lowerCamelCase, as a route's. */
 const TOPIC_NAME = /^[a-z][A-Za-z0-9]{0,63}$/;
 
@@ -404,6 +404,7 @@ function checkTopics(shape: Shape, value: Plain): void {
       shape.refuse(`${at}.name`, "a topic name used once", `${shape.who} declares the topic ${name} twice (topics[${before}] and ${at})`);
     }
     named.set(name, position);
+    if (topic.description !== undefined && typeof topic.description !== "string") shape.wrong(`${at}.description`, topic.description, "a string");
     const schema = topic.schema;
     if (!isObject(schema) || typeof schema.safeParse !== "function" || !("_zod" in schema)) {
       shape.wrong(`${at}.schema`, schema, "a zod schema");

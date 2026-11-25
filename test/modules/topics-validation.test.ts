@@ -26,7 +26,7 @@ function refusal(topics: unknown): UmbraError {
 describe("topics in a declaration", () => {
   it("accepts a module's topics, none, and an empty list", () => {
     const modules = [
-      declaration("with-topics", { topics: [HEIGHTS, defineTopic("rows2", z.array(z.string()))] }),
+      declaration("with-topics", { topics: [HEIGHTS, defineTopic("rows2", z.array(z.string()), { description: "Rows." })] }),
       declaration("no-topics"),
       declaration("empty-topics", { topics: [] }),
     ];
@@ -41,6 +41,7 @@ describe("topics in a declaration", () => {
     { name: "a name that is not lowerCamelCase", topics: [defineTopic("new-blocks", z.string())], field: "topics[0].name", says: "lowerCamelCase" },
     { name: "a topic declared twice", topics: [HEIGHTS, HEIGHTS], field: "topics[1].name", says: "declares the topic heights twice" },
     { name: "a schema that is not zod's", topics: [{ name: "heights", schema: {} }], field: "topics[0].schema", says: "a zod schema" },
+    { name: "a description that is not text", topics: [{ ...HEIGHTS, description: 1 }], field: "topics[0].description", says: "a string" },
     { name: "a schema JSON cannot carry", topics: [defineTopic("heights", z.bigint())], field: "topics[0].schema", says: "JSON cannot carry" },
   ];
   for (const c of cases) {

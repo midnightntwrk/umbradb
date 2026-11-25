@@ -206,8 +206,8 @@ const BASE = {
     .meta(SECRET),
   livenessTimeoutMs: count().default(30_000).meta(OPERATIONAL),
   apiReadTimeoutMs: z.number().int().min(1).max(MAX_READ_TIMEOUT_MS).default(30_000).meta(OPERATIONAL),
-  // `openapi` serves GET /openapi.json on the module API; `ui` also serves Swagger UI at /docs.
-  apiDocs: z.enum(["off", "openapi", "ui"]).default("off").meta(OPERATIONAL),
+  // `spec` serves /openapi.json and /asyncapi.json on the module API; `ui` also their UIs at /docs and /docs/events.
+  apiDocs: z.enum(["off", "spec", "ui"]).default("off").meta(OPERATIONAL),
   slowBlockMs: count().default(60_000).meta(OPERATIONAL),
   followingThreshold: count().default(3).meta(OPERATIONAL),
   readinessLag: count().optional().meta(OPERATIONAL),

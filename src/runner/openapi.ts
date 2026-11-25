@@ -9,7 +9,7 @@ import { VERSION_HEADER } from "./api-answers.js";
 import { CHAIN_DATA_HEADERS, CHAIN_DATA_VIEW } from "./envelope.js";
 import type { JsonSchema, RouteEntry } from "./route-http.js";
 
-type Json = Record<string, unknown>;
+export type Json = Record<string, unknown>;
 
 const ERROR_SCHEMA: Json = {
   type: "object",
@@ -54,7 +54,7 @@ function collapseConsts(schema: Json): Json {
  * `schema` ready to embed: zod's `$defs` and root `#` refs only resolve inside the schema itself, so they move to
  * `components.schemas` under `prefix`.
  */
-function embed(schema: JsonSchema, prefix: string, components: Json): Json {
+export function embed(schema: JsonSchema, prefix: string, components: Json): Json {
   const { $schema: _, $defs, ...root } = schema as Json;
   const rootName = componentName(prefix);
   let selfReferenced = false;
@@ -128,7 +128,7 @@ function operationOf(entry: RouteEntry, schemas: Json): Json {
 }
 
 /** The OpenAPI 3.1 document of `routes` (see the module comment). */
-export function openApiDocument(routes: readonly RouteEntry[]): Json {
+export function openApiDocument(routes: readonly RouteEntry[], description?: string): Json {
   // Hoisted names are prefixed with a route id, which holds a dot, so they never take "error".
   const schemas: Json = { error: ERROR_SCHEMA };
   const paths: Record<string, Json> = {};
@@ -138,7 +138,7 @@ export function openApiDocument(routes: readonly RouteEntry[]): Json {
   }
   return {
     openapi: "3.1.0",
-    info: { title: "UmbraDB module API", version: UMBRADB_VERSION },
+    info: { title: "UmbraDB module API", version: UMBRADB_VERSION, ...(description === undefined ? {} : { description }) },
     // Relative to the document, so "try it" works behind a proxy that serves the API under a prefix.
     servers: [{ url: "." }],
     tags: [...new Set(routes.map((entry) => entry.module))].map((name) => ({ name })),
