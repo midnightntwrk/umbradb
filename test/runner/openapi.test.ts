@@ -85,7 +85,7 @@ describe("GET /openapi.json", () => {
         registry.route(
           defineRoute({
             name: "pick",
-            input: z.object({ kind: z.union([z.literal(1), z.literal(2)]).describe("which"), mixed: z.union([z.literal("a"), z.literal(2)]), maybe: z.string().nullable() }),
+            input: z.object({ kind: z.union([z.literal(1), z.literal(2)]).describe("which"), mixed: z.union([z.literal("a"), z.literal(2)]), either: z.union([z.string(), z.int()]) }),
             output: z.null(),
             http: { method: "GET", path: "/pick" },
             handle: async () => null,
@@ -96,7 +96,7 @@ describe("GET /openapi.json", () => {
     const schemas = Object.fromEntries(doc.paths["/m/pick"].get.parameters.map((p: { name: string; schema: unknown }) => [p.name, p.schema]));
     expect(schemas.kind).toEqual({ type: "number", enum: [1, 2], description: "which" });
     expect(schemas.mixed).toEqual({ enum: ["a", 2] });
-    expect(schemas.maybe.anyOf).toHaveLength(2);
+    expect(schemas.either.anyOf.map((member: { type: string }) => member.type)).toEqual(["string", "integer"]);
   });
 
   it("gives a binary route its range and ifMatch parameters, naming their headers, and a partial answer of any type", async () => {
