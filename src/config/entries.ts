@@ -97,6 +97,8 @@ export type CoreSettingsBase = {
   readonly livenessTimeoutMs?: number;
   /** A whole number from 1 to 2,147,483,647 (`./core-settings.ts`). */
   readonly apiReadTimeoutMs?: number;
+  /** The module API's documentation: `openapi` serves `/openapi.json`, `ui` also Swagger UI at `/docs` (`off`). */
+  readonly apiDocs?: "off" | "openapi" | "ui";
   readonly slowBlockMs?: number;
   readonly followingThreshold?: number;
   readonly readinessLag?: number;

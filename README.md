@@ -188,6 +188,7 @@ The `core` entry's settings, the main ones (`GET /config` shows them all, with t
 | `livenessTimeoutMs` | `30000` | `/health/live` answers 503 when the main loop is stuck longer |
 | `slowBlockMs` | `60000` | The `slow-block` condition after a height runs longer |
 | `apiReadTimeoutMs` | `30000` | A module API request's read, on PostgreSQL (504 `query-timeout`) |
+| `apiDocs` | `"off"` | The module API's documentation: `"openapi"` serves its OpenAPI 3.1 document at `/openapi.json`, `"ui"` also serves Swagger UI at `/docs` |
 
 The database's parts: `{ kind: "postgres", host, port, user, password, name, ssl }`, `{ kind: "pglite", path }` or
 `{ kind: "pglite", memory: true }`. A PostgreSQL database's `port` is 5432 unless given, and `ssl` is `disable`,

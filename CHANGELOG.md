@@ -15,6 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- API documentation: the core setting `apiDocs` serves an OpenAPI 3.1 document of every route at `/openapi.json`
+  (`"openapi"`), or that and a vendored Swagger UI at `/docs` (`"ui"`). Off by default.
 - Binary routes (`defineBinaryRoute`, `api.binaryRoute`): API endpoints that serve all or part of a file, with byte
   ranges, `ETag`/`If-Match` and a per-route answer size limit.
 - Recorded history files: a configuration's `history: "<file>"` supplies every revision the database ran up to the

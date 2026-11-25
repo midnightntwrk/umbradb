@@ -1,11 +1,13 @@
 /**
- * `node:fs` in the browser build: a browser reads no file. The bundled sources name two of its functions, and neither
+ * `node:fs` in the browser build: a browser reads no file. The bundled sources name three of its functions, and neither
  * is called there:
  * - `existsSync`, which only the default entries of the ledger worker and the admin worker call (`ledgerWorkerEntry`,
  *   `workerEntry`). The browser gives the ledger worker its entry (`browser/src/core-worker.ts`) and serves the admin
  *   endpoints itself. It answers false.
  * - `createReadStream`, with which a restore reads a backup file by its path (`src/backup/restore.ts`). The page gives
  *   the restore the picked file's text instead (`src/backup/text.ts`'s `blobText`). It fails.
+ * - `readFileSync`, with which `apiDocs: "ui"` reads Swagger UI (`src/runner/api-docs.ts`). It fails, so those paths
+ *   answer 404.
  */
 
 export function existsSync(_path: unknown): boolean {
@@ -14,4 +16,8 @@ export function existsSync(_path: unknown): boolean {
 
 export function createReadStream(path: unknown): never {
   throw new Error(`createReadStream(${String(path)}) of node:fs is not available in the browser build: it reads no file`);
+}
+
+export function readFileSync(path: unknown): never {
+  throw new Error(`readFileSync(${String(path)}) of node:fs is not available in the browser build: it reads no file`);
 }

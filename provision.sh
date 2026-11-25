@@ -265,6 +265,9 @@ EOF
     echo '}'
   } | put /etc/nginx/sites-available/umbradb 0644 root:root || true
   ln -sf /etc/nginx/sites-available/umbradb /etc/nginx/sites-enabled/umbradb
+  # The workers (www-data) spill large answers here; found owned by nobody, which truncated them mid-stream.
+  local temp
+  for temp in body proxy fastcgi scgi uwsgi; do install -d -o www-data -g root -m 0700 "/var/lib/nginx/$temp"; done
   nginx -t -q
   systemctl enable -q nginx
   systemctl reload-or-restart nginx

@@ -37,6 +37,7 @@ const core = {
   // Peer authentication over the local socket: the umbradb OS user logs in as the umbradb role.
   database: { kind: "postgres", host: "/var/run/postgresql", user: "umbradb", name: `umbradb_${network}` },
   listen: ports,
+  apiDocs: "ui",
 } as const;
 
 export const modules = [TOKEN_METADATA, TOKEN_METADATA_API];

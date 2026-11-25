@@ -541,12 +541,16 @@ describe("integers beyond 2^53: bigintText and uintText", () => {
     expect(refusal((registry) => registry.route(route(bigintText().default(0n))))).toMatch(/BigInt defaults.*: give a bigintText's default on the wire side, \.prefault\("0"\)$/);
   });
 
-  it("describe the wire side in the catalog: digits in a string or an integer, format bigint", () => {
+  it("describe the wire side in the catalog: an input as digits in a string or an integer, an output as the digits written", () => {
     const [entry] = api().routes.routes;
-    const unsigned = { anyOf: [{ type: "string", pattern: "^(0|[1-9][0-9]{0,38})$" }, { type: "integer", minimum: 0 }], format: "bigint" };
-    const signed = { anyOf: [{ type: "string", pattern: "^(0|-?[1-9][0-9]{0,77})$" }, { type: "integer" }], format: "bigint" };
+    const unsignedDigits = "^(0|[1-9][0-9]{0,38})$";
+    const signedDigits = "^(0|-?[1-9][0-9]{0,77})$";
+    const unsigned = { anyOf: [{ type: "string", pattern: unsignedDigits }, { type: "integer", minimum: 0 }], format: "bigint" };
+    const signed = { anyOf: [{ type: "string", pattern: signedDigits }, { type: "integer" }], format: "bigint" };
     expect(entry?.input).toMatchObject({ type: "object", required: ["above"], properties: { above: unsigned, delta: signed } });
-    expect(entry?.output).toMatchObject({ type: "object", properties: { amount: unsigned, deltas: { type: "array", items: signed } }, additionalProperties: false });
+    const written = (pattern: string) => ({ type: "string", pattern, format: "bigint" });
+    expect(entry?.output).toMatchObject({ type: "object", properties: { amount: written(unsignedDigits), deltas: { type: "array", items: written(signedDigits) } }, additionalProperties: false });
+    expect(JSON.stringify(entry?.output)).not.toContain("anyOf");
   });
 
   it("uintText takes a number of bits from 1 to 256", () => {

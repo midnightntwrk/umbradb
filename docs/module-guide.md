@@ -580,6 +580,10 @@ counts and queue (after a restart, for one).
   - **Handler:** `handle(input, { read, height, hash })`. Every answer is read at one committed height, `height`, whose
     block hash is `hash` (`0x` hex text). Before the first block commits, the route answers 503 `no-committed-height` without calling
     you.
+  - **Documentation:** with the core setting `apiDocs: "openapi"`, `GET /openapi.json` on the module API is an
+    OpenAPI 3.1 document of every route, built from your schemas; `"ui"` also serves Swagger UI at `/docs`.
+    `description` becomes the operation's summary, and `.describe("…")` or `.meta({ examples })` on a field shows up
+    beside it. Raw `api.http` handlers are left out, and no module may register the paths the setting serves.
   - **Errors:** throw `new RouteError(kind, code, message)` to refuse a request. `kind` says what went wrong in terms
     every transport has; `code` is your own, for a client to match. It is answered `{ "error": { "code", "message" } }`.
 
