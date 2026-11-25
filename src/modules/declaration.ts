@@ -18,7 +18,7 @@ import type { z } from "zod";
 import { type EntryBuilder, moduleEntryBuilder } from "../config/entries.js";
 import type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "../db/api.js";
 import type { ContentFunction } from "../determinism/contents-hash.js";
-import type { Route } from "./route.js";
+import type { BinaryRoute, Route } from "./route.js";
 
 /** The points: the runner's steps where module callbacks attach, in the order the runner reaches them. */
 export const POINTS = Object.freeze([
@@ -217,6 +217,12 @@ export interface ItemSink {
   put(item: string, value: unknown): void;
 }
 
+/** The request headers the module API passes to a handler: `Range` and `If-Match` only. */
+export interface RequestHeaders {
+  readonly range?: string;
+  readonly ifMatch?: string;
+}
+
 /** Where `on-start-api` registers the module's routes, raw HTTP handlers and subscriptions. */
 export interface ApiRegistry {
   /**
@@ -224,6 +230,8 @@ export interface ApiRegistry {
    * serves it under `/<module-id>` over HTTP, and over any transport added later. The way to write an API.
    */
   route<I extends z.ZodType, O extends z.ZodType>(route: Route<I, O>): void;
+  /** Registers a binary route (`./route.ts`): a route that answers a file's bytes, whole or a byte range. */
+  binaryRoute<I extends z.ZodType>(route: BinaryRoute<I>): void;
   /**
    * Registers a raw HTTP handler at `path` as given: for what is HTTP by nature (a GraphQL endpoint, a file). The
    * module owns its path, status and headers, and no other transport serves it.
@@ -232,7 +240,7 @@ export interface ApiRegistry {
     method: "GET" | "POST",
     path: string,
     handler: (
-      req: { params: Record<string, string>; body: unknown },
+      req: { params: Record<string, string>; body: unknown; headers?: RequestHeaders },
       read: ReadHandle,
     ) => Promise<{ status: number; headers?: Record<string, string>; body: unknown }>,
   ): void;

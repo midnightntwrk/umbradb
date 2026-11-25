@@ -271,6 +271,7 @@ export async function tokensHandler(): Promise<ApiHandler> {
       const bound = bindRoute(TOKEN_METADATA_API_ID, route);
       handlers.set(bound.entry.http.path, bound.handler);
     },
+    binaryRoute: () => undefined,
     http: () => undefined,
     subscription: () => undefined,
   });

@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Binary routes (`defineBinaryRoute`, `api.binaryRoute`): API endpoints that serve all or part of a file, with byte
+  ranges, `ETag`/`If-Match` and a per-route answer size limit.
 - Recorded history files: a configuration's `history: "<file>"` supplies every revision the database ran up to the
   file's height, so the configuration lists only what it runs now. `umbradb restore` writes the backup's history there
   once it commits, refusing with `backup-history-mismatch` when the file holds another history unless given

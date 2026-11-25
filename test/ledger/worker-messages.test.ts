@@ -161,7 +161,8 @@ describe("the messages between the main thread and the ledger worker", () => {
     expect(two["post.apply"]).toBeUndefined();
     expect(addingUpProblems([two, three])).toEqual([]);
     // Negative control: without the apply's time the parts of an entry do not add up to its span.
-    expect(addingUpProblems([two, three].map(({ "rq.apply": _apply, ...rest }) => rest))).toHaveLength(2);
+    // No share of the span is allowed: under load a short apply can be under 5% of an idle-heavy span.
+    expect(addingUpProblems([two, three].map(({ "rq.apply": _apply, ...rest }) => rest), 0, 0.001)).toHaveLength(2);
     // The node waits are the bridge's requests, the nodes those its answers carried; each wait fell inside a request,
     // and those of the apply inside its phases.
     const total = (key: string): number => [two, three].reduce((sum, entry) => sum + ((entry[key] as number | undefined) ?? 0), 0);

@@ -39,7 +39,16 @@
 import { z } from "zod";
 import { UmbraError } from "../db/errors.js";
 import type { ApiRegistry } from "../modules/declaration.js";
-import { type AnyRoute, invalidRequest, RouteError, type RouteErrorKind, type RouteHttp } from "../modules/route.js";
+import type { ReadHandle } from "../db/api.js";
+import {
+  type AnyBinaryRoute,
+  type AnyRoute,
+  invalidRequest,
+  RouteError,
+  type RouteContext,
+  type RouteErrorKind,
+  type RouteHttp,
+} from "../modules/route.js";
 import { encodeAsciiJson, readExactNumber } from "./api-json.js";
 import { CHAIN_DATA_HEADERS, chainDataHeaders, NO_COMMITTED_HEIGHT_STATUS, readChainDataView } from "./envelope.js";
 
@@ -59,8 +68,10 @@ export interface RouteEntry {
   readonly output: JsonSchema;
   /** Where the HTTP adapter serves it: the method and the whole path, `/<module-id>` included. */
   readonly http: RouteHttp;
+  /** `binary` for a binary route, whose answer is bytes (`./route-binary.ts`). */
+  readonly kind: "json" | "binary";
   /** The declaration itself. */
-  readonly route: AnyRoute;
+  readonly route: AnyRoute | AnyBinaryRoute;
 }
 
 /** A route bound to HTTP: its entry, and the handler the module API calls. */
@@ -103,9 +114,10 @@ const NUMBER = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/;
 /** What a `GET` parameter's text may be read as. */
 type Scalar = "string" | "number" | "boolean";
 
-type Answer = { status: number; headers: Record<string, string>; body: string };
+/** An answer of a route, as its HTTP handler gives it. */
+export type Answer = { status: number; headers: Record<string, string>; body: string | Uint8Array };
 
-const answer = (status: number, body: unknown, headers: Record<string, string> = {}): Answer => ({
+export const answer = (status: number, body: unknown, headers: Record<string, string> = {}): Answer => ({
   status,
   headers: { ...JSON_HEADERS, ...headers },
   body: encodeAsciiJson(body),
@@ -187,11 +199,42 @@ function issuesOf(error: z.ZodError, where: string): string[] {
     .map((issue) => `${where}${issue.path.map((part) => `/${clip(String(part), MAX_NAME)}`).join("")}: ${clip(issue.message, MAX_RULE)}`);
 }
 
+/** A route's checked name, input and place: what JSON and binary routes share. */
+export interface BoundInput {
+  readonly name: string;
+  readonly id: string;
+  readonly description?: string;
+  /** The input schema's wire side. */
+  readonly input: JsonSchema;
+  /** The method and the whole path, `/<module-id>` included. */
+  readonly http: RouteHttp;
+  /** A `TypeError` refusing the route, naming the module and the route. */
+  readonly refuse: (why: string) => TypeError;
+  /** The request's input as the schema read it; throws the 400 for one it refuses. */
+  readonly inputOf: (request: { params: Record<string, string>; body: unknown }) => unknown;
+}
+
+/** The wire side of `route`'s `side` schema as JSON Schema; throws `refuse`'s `TypeError` for one JSON cannot carry. */
+function jsonSchemaOf(route: AnyRoute | AnyBinaryRoute, side: "input" | "output", refuse: (why: string) => TypeError): JsonSchema {
+  const schema: unknown = (route as Partial<Record<"input" | "output", unknown>>)[side];
+  if (!isRecord(schema) || typeof schema.safeParse !== "function" || !("_zod" in schema)) throw refuse(`whose ${side} is not a zod schema`);
+  try {
+    // A schema's wire side is its input side, whichever way the route uses it.
+    return Object.freeze(z.toJSONSchema(schema as unknown as z.ZodType, { io: "input" }));
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    const fix = /default/i.test(why)
+      ? "give a bigintText's default on the wire side, .prefault(\"0\")"
+      : "for an integer beyond 2^53, use bigintText() or uintText(bits)";
+    throw refuse(`whose ${side} schema JSON cannot carry (${why}): ${fix}`);
+  }
+}
+
 /**
- * `route`, registered by `module`, checked and bound to HTTP (see the module comment). Throws a `TypeError` for a route
- * that cannot be served.
+ * `route`'s name, handler, input and `http` hint, checked (see the module comment); `method` without a hint. Throws a
+ * `TypeError` for a route that cannot be served.
  */
-export function bindRoute(module: string, route: AnyRoute): BoundRoute {
+export function bindInput(module: string, route: AnyRoute | AnyBinaryRoute, method: "GET" | "POST"): BoundInput {
   if (typeof route !== "object" || route === null) throw new TypeError(`${module} registered a route that is not an object`);
   const { name, description, handle } = route;
   if (typeof name !== "string" || !NAME.test(name)) {
@@ -200,29 +243,14 @@ export function bindRoute(module: string, route: AnyRoute): BoundRoute {
   const refuse = (why: string) => new TypeError(`${module} registered the route ${name}, ${why}`);
   if (typeof handle !== "function") throw refuse("whose handle is not a function");
   if (description !== undefined && typeof description !== "string") throw refuse("whose description is not a string");
-  const jsonSchemaOf = (side: "input" | "output"): JsonSchema => {
-    const schema: unknown = route[side];
-    if (!isRecord(schema) || typeof schema.safeParse !== "function" || !("_zod" in schema)) throw refuse(`whose ${side} is not a zod schema`);
-    try {
-      // A schema's wire side is its input side, whichever way the route uses it.
-      return Object.freeze(z.toJSONSchema(schema as unknown as z.ZodType, { io: "input" }));
-    } catch (error) {
-      const why = error instanceof Error ? error.message : String(error);
-      const fix = /default/i.test(why)
-        ? "give a bigintText's default on the wire side, .prefault(\"0\")"
-        : "for an integer beyond 2^53, use bigintText() or uintText(bits)";
-      throw refuse(`whose ${side} schema JSON cannot carry (${why}): ${fix}`);
-    }
-  };
-  const input = jsonSchemaOf("input");
-  const output = jsonSchemaOf("output");
-  // The schemas as registered: what the catalog describes is what each request is checked against.
-  const schemas: { readonly input: z.ZodType; readonly output: z.ZodType } = { input: route.input, output: route.output };
+  const input = jsonSchemaOf(route, "input", refuse);
+  // The schema as registered: what the catalog describes is what each request is checked against.
+  const inputSchema: z.ZodType = route.input;
 
-  const hint: unknown = route.http ?? { method: "POST", path: `/${name}` };
+  const hint: unknown = route.http ?? { method, path: `/${name}` };
   if (!isRecord(hint)) throw refuse("whose http is not { method, path }");
-  const { method, path } = hint;
-  if (method !== "GET" && method !== "POST") throw refuse(`whose http method is ${String(method)}, neither GET nor POST`);
+  const { method: hintMethod, path } = hint;
+  if (hintMethod !== "GET" && hintMethod !== "POST") throw refuse(`whose http method is ${String(hintMethod)}, neither GET nor POST`);
   if (typeof path !== "string" || !path.startsWith("/")) throw refuse(`whose http path does not start with /: ${JSON.stringify(path)}`);
   const pathParameters = path
     .split("/")
@@ -232,7 +260,7 @@ export function bindRoute(module: string, route: AnyRoute): BoundRoute {
   const parameters = new Map<string, ReadonlySet<Scalar>>();
   /** What a parameter that is text or something else is read as when it is not taken as text. */
   const withoutText = (scalars: ReadonlySet<Scalar>): ReadonlySet<Scalar> => new Set([...scalars].filter((scalar) => scalar !== "string"));
-  if (method === "POST") {
+  if (hintMethod === "POST") {
     if (pathParameters.length > 0) throw refuse(`whose POST path takes the parameter ${pathParameters[0]}: a POST's input is its body, so use GET or put it in the body`);
   } else {
     if (input.type !== "object" || !isRecord(input.properties)) throw refuse("whose input is not an object: a GET's input is its parameters, so use POST");
@@ -245,29 +273,17 @@ export function bindRoute(module: string, route: AnyRoute): BoundRoute {
     if (missing !== undefined) throw refuse(`whose path names the parameter ${missing}, which its input schema lacks`);
   }
   const declared = declaredNames(input);
-  const id = `${module}.${name}`;
-  const entry: RouteEntry = Object.freeze({
-    module,
-    name,
-    id,
-    ...(description === undefined ? {} : { description }),
-    input,
-    output,
-    http: Object.freeze({ method, path: path === "/" ? `/${module}` : `/${module}${path}` }),
-    route,
-  });
 
-  /** The request's input as the schema read it; throws the 400 for one it refuses. */
   const inputOf = (request: { params: Record<string, string>; body: unknown }): unknown => {
     const sent = Object.keys(request.params);
-    if (method === "POST" && sent.length > 0) throw invalidRequest("input: a POST route takes its input in its JSON body, not in parameters");
-    const named = method === "GET" ? sent : isRecord(request.body) ? Object.keys(request.body) : [];
+    if (hintMethod === "POST" && sent.length > 0) throw invalidRequest("input: a POST route takes its input in its JSON body, not in parameters");
+    const named = hintMethod === "GET" ? sent : isRecord(request.body) ? Object.keys(request.body) : [];
     const unknown = declared === undefined ? [] : named.filter((key) => !declared.has(key));
     if (unknown.length > 0) {
       throw invalidRequest(unknown.slice(0, MAX_ERRORS).map((key) => `input/${clip(key, MAX_NAME)}: not an input of this route`).join("; "));
     }
-    if (method === "POST") {
-      const parsed = schemas.input.safeParse(request.body);
+    if (hintMethod === "POST") {
+      const parsed = inputSchema.safeParse(request.body);
       if (parsed.success) return parsed.data;
       throw invalidRequest(request.body === undefined ? "input: a JSON body is required" : issuesOf(parsed.error, "input").join("; "));
     }
@@ -283,23 +299,81 @@ export function bindRoute(module: string, route: AnyRoute): BoundRoute {
       }
       return out;
     };
-    const parsed = schemas.input.safeParse(read(new Set()));
+    const parsed = inputSchema.safeParse(read(new Set()));
     if (parsed.success) return parsed.data;
     // A parameter the schema takes as text or as a number ("all" or a count) was read as text. Where the schema refused
     // that text, read it as the other type and ask again.
     const refused = new Set(parsed.error.issues.map((issue) => String(issue.path[0])));
     const retry = new Set(sent.filter((key) => refused.has(key) && (parameters.get(key)?.has("string") ?? false) && (parameters.get(key)?.size ?? 0) > 1));
     if (retry.size > 0) {
-      const again = schemas.input.safeParse(read(retry));
+      const again = inputSchema.safeParse(read(retry));
       if (again.success) return again.data;
     }
     throw invalidRequest(issuesOf(parsed.error, "input").join("; "));
   };
 
+  return Object.freeze({
+    name,
+    id: `${module}.${name}`,
+    ...(description === undefined ? {} : { description }),
+    input,
+    http: Object.freeze({ method: hintMethod, path: path === "/" ? `/${module}` : `/${module}${path}` }),
+    refuse,
+    inputOf,
+  });
+}
+
+/**
+ * `answer` called at `read`'s committed height with its context and chain-data headers; a `RouteError` it throws is
+ * answered in the envelope with those headers, and 503 `no-committed-height` before block S without calling it.
+ */
+export async function answerAtView(
+  read: ReadHandle,
+  answerWith: (context: RouteContext, headers: Record<string, string>) => Promise<Answer>,
+): Promise<Answer> {
+  let view: Awaited<ReturnType<typeof readChainDataView>>;
+  try {
+    view = await readChainDataView(read);
+  } catch (error) {
+    if (!(error instanceof UmbraError && error.code === "no-committed-height")) throw error;
+    return answer(NO_COMMITTED_HEIGHT_STATUS, { error: { code: error.code, message: error.message } });
+  }
+  const headers = chainDataHeaders(view);
+  try {
+    const context = Object.freeze({ read, height: view.height, hash: headers[CHAIN_DATA_HEADERS.hash] as string });
+    return await answerWith(context, headers);
+  } catch (error) {
+    if (error instanceof RouteError) return answer(ROUTE_ERROR_STATUS[error.kind], { error: { code: error.code, message: error.message } }, headers);
+    throw error;
+  }
+}
+
+/**
+ * `route`, registered by `module`, checked and bound to HTTP (see the module comment). Throws a `TypeError` for a route
+ * that cannot be served.
+ */
+export function bindRoute(module: string, route: AnyRoute): BoundRoute {
+  const bound = bindInput(module, route, "POST");
+  const { id, inputOf } = bound;
+  const output = jsonSchemaOf(route, "output", bound.refuse);
+  const { handle } = route;
+  const outputSchema: z.ZodType = route.output;
+  const entry: RouteEntry = Object.freeze({
+    module,
+    name: bound.name,
+    id,
+    ...(bound.description === undefined ? {} : { description: bound.description }),
+    input: bound.input,
+    output,
+    http: bound.http,
+    kind: "json",
+    route,
+  });
+
   /** The handler's `result` as the output schema writes it. */
   const write = (result: unknown) => {
     try {
-      return z.safeEncode(schemas.output, result as never);
+      return z.safeEncode(outputSchema, result as never);
     } catch (error) {
       // What is no issue of the value: a transform, which reads one way only.
       const why = error instanceof Error ? error.message : String(error);
@@ -307,17 +381,8 @@ export function bindRoute(module: string, route: AnyRoute): BoundRoute {
     }
   };
 
-  const handler: BoundRoute["handler"] = async (request, read) => {
-    let view: Awaited<ReturnType<typeof readChainDataView>>;
-    try {
-      view = await readChainDataView(read);
-    } catch (error) {
-      if (!(error instanceof UmbraError && error.code === "no-committed-height")) throw error;
-      return answer(NO_COMMITTED_HEIGHT_STATUS, { error: { code: error.code, message: error.message } });
-    }
-    const headers = chainDataHeaders(view);
-    try {
-      const context = Object.freeze({ read, height: view.height, hash: headers[CHAIN_DATA_HEADERS.hash] as string });
+  const handler: BoundRoute["handler"] = (request, read) =>
+    answerAtView(read, async (context, headers) => {
       const result = await handle.call(route, inputOf(request), context);
       const written = write(result);
       if (!written.success) {
@@ -330,10 +395,6 @@ export function bindRoute(module: string, route: AnyRoute): BoundRoute {
         const why = error instanceof Error ? error.message : String(error);
         throw new Error(`the route ${id} built an answer JSON cannot carry (${why}): an output is a JSON value, null where there is none`);
       }
-    } catch (error) {
-      if (error instanceof RouteError) return answer(ROUTE_ERROR_STATUS[error.kind], { error: { code: error.code, message: error.message } }, headers);
-      throw error;
-    }
-  };
+    });
   return Object.freeze({ entry, handler });
 }

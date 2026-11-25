@@ -25,6 +25,8 @@
  *   other error is a bug: the client is told nothing of it.
  * - **`http`** is a hint for the HTTP adapter only, and optional: the method and the path under `/<module-id>`.
  *   Without it the route is `POST /<module-id>/<name>`.
+ * - **Binary routes** ({@link BinaryRoute}, `api.binaryRoute`) answer bytes instead of JSON, whole or a byte range
+ *   (`../runner/route-binary.ts`).
  */
 
 import type { z } from "zod";
@@ -111,3 +113,48 @@ export type AnyRoute = Route<any, any>;
 
 /** {@link Route}, typed by its schemas: `defineRoute({ name, input, output, handle })`. */
 export const defineRoute = <I extends z.ZodType, O extends z.ZodType>(route: Route<I, O>): Route<I, O> => route;
+
+/**
+ * What a binary route answers with. The core reads only the part a request asks for, so `read` may fetch lazily; it
+ * is called only while the request runs, inside its read.
+ */
+export interface BinaryFile {
+  /** The answer's `Content-Type`. */
+  readonly contentType: string;
+  /** The file's length in bytes. */
+  readonly size: number;
+  /** A strong validator, sent quoted as the `ETag` and checked against `If-Match`: equal only for equal bytes. Visible ASCII but `"`. */
+  readonly etag?: string;
+  /** Bytes `start` to `end` (exclusive), `0 <= start < end <= size`. */
+  readonly read: (start: number, end: number) => Promise<Uint8Array>;
+}
+
+/**
+ * A binary route: a {@link Route} whose answer is a {@link BinaryFile}, all of it or the byte range a request names
+ * (`Range`, or the `range` parameter, which its input may not declare). Always a `GET`; `GET /<module-id>/<name>`
+ * without `http`.
+ */
+export interface BinaryRoute<I extends z.ZodType = z.ZodType> {
+  readonly name: string;
+  readonly description?: string;
+  readonly input: I;
+  readonly http?: RouteHttp & { readonly method: "GET" };
+  /** The most bytes one answer carries; a request for more is refused, so a client asks for ranges. 1 MiB by default. */
+  readonly maxAnswerBytes?: number;
+  readonly handle: (input: z.output<I>, context: RouteContext) => Promise<BinaryFile>;
+}
+
+/** A binary route of any input, as the core holds one. */
+// biome-ignore lint/suspicious/noExplicitAny: the schema of a registered route is not known where it is held
+export type AnyBinaryRoute = BinaryRoute<any>;
+
+/** {@link BinaryRoute}, typed by its input: `defineBinaryRoute({ name, input, handle })`. */
+export const defineBinaryRoute = <I extends z.ZodType>(route: BinaryRoute<I>): BinaryRoute<I> => route;
+
+/** `bytes` held in memory as a {@link BinaryFile}. */
+export const binaryData = (bytes: Uint8Array, contentType: string, etag?: string): BinaryFile => ({
+  contentType,
+  size: bytes.byteLength,
+  ...(etag === undefined ? {} : { etag }),
+  read: async (start, end) => bytes.subarray(start, end),
+});

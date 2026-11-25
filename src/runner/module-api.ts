@@ -7,7 +7,8 @@
  * (`../modules/route.ts`): a named operation with schemas and no transport, which the core keeps
  * ({@link ApiRoutes.routes}) and serves over HTTP through `./route-http.ts`, under `/<module-id>`. `registry.http(…)`
  * gives a raw HTTP handler, for what is HTTP by nature (a GraphQL endpoint, a file): the module owns its path, its
- * status and its headers. Both end as HTTP routes here, matched and answered alike.
+ * status and its headers. `registry.binaryRoute(route)` gives a route that answers bytes (`./route-binary.ts`). All
+ * end as HTTP routes here, matched and answered alike. A handler gets the request's `Range` and `If-Match` only.
  *
  * **Registration.** {@link registerModuleApis} runs `on-start-api` once, at startup, after the process contexts are
  * sealed. It runs for the parts this process may run: those active in a range of the graph's `ranges`, the cursor's
@@ -64,14 +65,15 @@
 import type { ReadHandle, ReadOptions } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
-import type { ApiRegistry } from "../modules/declaration.js";
+import type { ApiRegistry, RequestHeaders } from "../modules/declaration.js";
 import type { ResolvedGraph } from "../modules/graph.js";
-import type { Route } from "../modules/route.js";
+import type { BinaryRoute, Route } from "../modules/route.js";
 import { encodeJson, readExactNumber, UnreadableNumber } from "./api-json.js";
 import { runSchedule, seriesOf } from "./dispatch.js";
 import type { ChainDataAnswer } from "./envelope.js";
 import type { ProcessContexts } from "./process-context.js";
-import { bindRoute, type RouteEntry } from "./route-http.js";
+import { bindBinaryRoute } from "./route-binary.js";
+import { type BoundRoute, bindRoute, type RouteEntry } from "./route-http.js";
 
 export { encodeJson } from "./api-json.js";
 export type { JsonSchema, RouteEntry } from "./route-http.js";
@@ -151,6 +153,8 @@ export interface ApiRequest {
   readonly query?: Iterable<readonly [string, string]>;
   /** The body as text; a POST's only. */
   readonly body?: string;
+  /** `Range` and `If-Match`, passed to the handler. */
+  readonly headers?: RequestHeaders;
 }
 
 /** An answer, as the transport sends it. */
@@ -263,15 +267,17 @@ export class ApiRoutes {
         route: Object.freeze({ module, method, path, segments: Object.freeze(segments), handler, exact }),
       });
     };
+    const route = (declared: Route | BinaryRoute, bind: (module: string, route: never) => BoundRoute): void => {
+      if (!open) throw after(`the route ${String((declared as { name?: unknown } | null)?.name)}`);
+      const bound = bind(module, declared as never);
+      const { id } = bound.entry;
+      if (this.#routes.has(id)) throw new TypeError(`${module} registered the route ${bound.entry.name} twice: a route's name is registered once`);
+      http(bound.entry.http.method, bound.entry.http.path, bound.handler, true);
+      this.#routes.set(id, bound.entry);
+    };
     const registry: ApiRegistry = Object.freeze({
-      route: (route: Route): void => {
-        if (!open) throw after(`the route ${String((route as { name?: unknown } | null)?.name)}`);
-        const bound = bindRoute(module, route);
-        const { id } = bound.entry;
-        if (this.#routes.has(id)) throw new TypeError(`${module} registered the route ${bound.entry.name} twice: a route's name is registered once`);
-        http(bound.entry.http.method, bound.entry.http.path, bound.handler, true);
-        this.#routes.set(id, bound.entry);
-      },
+      route: (declared: Route): void => route(declared, bindRoute),
+      binaryRoute: (declared: BinaryRoute): void => route(declared, bindBinaryRoute),
       http: (method: HttpMethod, path: string, handler: HttpHandler): void => {
         if (!open) throw after(`${String(method)} ${String(path)}`);
         http(method, path, handler);
@@ -384,7 +390,10 @@ export class ModuleApi {
     route.segments.forEach((segment, index) => {
       if ("param" in segment) params[segment.param] = segments[index] as string;
     });
-    const req = Object.freeze({ params: Object.freeze(params), body });
+    const headers: { range?: string; ifMatch?: string } = {};
+    if (request.headers?.range !== undefined) headers.range = request.headers.range;
+    if (request.headers?.ifMatch !== undefined) headers.ifMatch = request.headers.ifMatch;
+    const req = Object.freeze({ params: Object.freeze(params), body, headers: Object.freeze(headers) });
     try {
       const answered = await this.#options.db.read((read) => this.handle(route, req, read), {
         timeoutMs: this.#options.timeoutMs,
