@@ -6,6 +6,6 @@
     "asyncapi-standalone.js": "browser/standalone/index.js",
     "asyncapi-standalone.js.LICENSE.txt": "browser/standalone/index.js.LICENSE.txt",
     "asyncapi.css": "styles/default.min.css",
-    "LICENSE": "LICENSE"
+    "LICENSE.upstream": "LICENSE"
   }
 }

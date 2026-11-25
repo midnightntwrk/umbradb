@@ -17,12 +17,12 @@ const PACKAGES = [
     name: "swagger-ui-dist",
     version: "5.35.0",
     integrity: "sha512-U06rpMtW9V3XPGOBeamTUSr0Z09jMX4IJuANpE/EZbAhw0G8CgwrzU4YmXkn/h0wCDNsXdGarTNNHC3sU8yVUQ==",
-    // vendored name: path in the package
+    // vendored name: path in the package. Not "LICENSE": CODEOWNERS gives that name, at any depth, to the root license's owners.
     files: {
       "swagger-ui-bundle.js": "swagger-ui-bundle.js",
       "swagger-ui-bundle.js.LICENSE.txt": "swagger-ui-bundle.js.LICENSE.txt",
       "swagger-ui.css": "swagger-ui.css",
-      LICENSE: "LICENSE",
+      "LICENSE.upstream": "LICENSE",
       NOTICE: "NOTICE",
     },
   },
@@ -35,7 +35,7 @@ const PACKAGES = [
       "asyncapi-standalone.js": "browser/standalone/index.js",
       "asyncapi-standalone.js.LICENSE.txt": "browser/standalone/index.js.LICENSE.txt",
       "asyncapi.css": "styles/default.min.css",
-      LICENSE: "LICENSE",
+      "LICENSE.upstream": "LICENSE",
     },
   },
 ];
