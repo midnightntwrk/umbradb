@@ -56,7 +56,7 @@ tooling only — never shipped in the runtime path.
 | `fast-check` | `^4.9.0` → **4.9.0** | range → locked | registry.npmjs.org | `sha512-7ms6T7Sy…PCllg==` | MIT | Property-based testing (P1–P10 properties) | fast-check releases |
 | `@midnightntwrk/wallet-sdk-abstractions` | **3.0.0-canary.20260716150734-e744d99** | exact canary build | registry.npmjs.org | `sha512-8oJ+0o09…7LDLw==` | Apache-2.0 | Wallet-state type/shape reference for test fixtures; test-only per the indexer-agnostic boundary | Midnight SDK — canary, watch closely |
 
-> **Install scripts.** 5 of the 307 packages declare an install/lifecycle script — all in the
+> **Install scripts.** 5 of the 329 packages declare an install/lifecycle script — all in the
 > **dev/optional** toolchain, **none in the runtime (`@electric-sql/pglite`, `postgres`,
 > `typescript`, `ws`, `zod`) tree**: `esbuild@0.28.2`, `protobufjs@7.6.5`, `ssh2@1.17.0`, and the optional
 > `cpu-features@0.0.10` + `fsevents@2.3.3` (darwin-only). This corrects the "zero install scripts"
@@ -200,6 +200,22 @@ commits).
 | clang 14, llvm 14, git, jq, curl (in the image) | `1:14.0.6-12`, `1:2.39.5-0+deb12u3`, `1.6-2.1+deb12u2`, `7.88.1-10+deb12u15` | exact versions from snapshot.debian.org `20260918T000000Z` | Debian bookworm | C toolchain for `blst` on wasm32; source fetch; build scripting | Debian security updates |
 | `wasm-bindgen-cli` (in the image) | 0.2.108 | exact version, `cargo install --locked` | crates.io | JavaScript bindings (the version ledger-9.1.0.0-rc.5 and ledger-9.1.0.1 pin; the v8 and v9-rc3 patches move ledger-8.1.2 and ledger-9.1.0.0-rc.3 from 0.2.104, whose output varies from run to run, to it) | wasm-bindgen releases |
 | binaryen `wasm-opt` (in the image) | `version_133` | release tarball SHA-256 (`x86_64` `2dc9c781…7489`, `aarch64` `89c07ea5…9bf8`) | github.com/WebAssembly/binaryen releases | Size optimization (`-Os`), as upstream's release recipe | binaryen releases |
+
+## 10. Vendored API documentation UIs (`vendor/swagger-ui/`, `vendor/asyncapi-react/`)
+
+Source: `scripts/vendor-web-ui.mjs`, and each directory's `upstream.json` and `SHA256SUMS`. The prebuilt browser
+bundles, stylesheets and license files of two npm packages, served at `/docs` and `/docs/events` when `apiDocs` is
+`"ui"`. Neither package is a dependency: `npm run vendor:web-ui` fetches only each package's own tarball (`npm pack`,
+no dependencies, no scripts), refuses one whose sha512 is not the pinned integrity, and copies the listed files out of
+it. `.github/workflows/supply-chain.yml` runs `npm run vendor:web-ui:check`, which vendors again into a temporary
+directory and fails on any difference from the committed files. These are **runtime** artifacts shipped in the npm
+package, outside `npm audit`'s scope. To update one, change its version and integrity in the script and run
+`npm run vendor:web-ui`.
+
+| Component | Version/Pin | Pinning | Source | Purpose | Update-watch |
+|---|---|---|---|---|---|
+| Swagger UI (`swagger-ui-bundle.js`, `swagger-ui.css`) | **5.35.0** | tarball `sha512-U06rpMtW…8yVUQ==`; files SHA-256 | registry.npmjs.org (`swagger-ui-dist`, Apache-2.0) | Interactive documentation of the HTTP routes (`/docs`) | swagger-ui releases / advisories |
+| AsyncAPI React standalone (`asyncapi-standalone.js`, `asyncapi.css`) | **3.2.3** | tarball `sha512-/hnh4xIK…/QUKGw==`; files SHA-256 | registry.npmjs.org (`@asyncapi/react-component`, Apache-2.0) | Documentation of the WebSocket topics (`/docs/events`) | asyncapi-react releases / advisories |
 
 ## License summary
 

@@ -580,6 +580,11 @@ counts and queue (after a restart, for one).
   - **Handler:** `handle(input, { read, height, hash })`. Every answer is read at one committed height, `height`, whose
     block hash is `hash` (`0x` hex text). Before the first block commits, the route answers 503 `no-committed-height` without calling
     you.
+  - **Documentation:** with the core setting `apiDocs: "spec"`, `GET /openapi.json` on the module API is an
+    OpenAPI 3.1 document of every route, and `GET /asyncapi.json` an AsyncAPI 3.0 document of every topic, built from
+    your schemas; `"ui"` also serves Swagger UI at `/docs` and AsyncAPI's renderer at `/docs/events`.
+    `description` becomes the operation's summary, and `.describe("…")` or `.meta({ examples })` on a field shows up
+    beside it. Raw `api.http` handlers are left out, and no module may register the paths the setting serves.
   - **Errors:** throw `new RouteError(kind, code, message)` to refuse a request. `kind` says what went wrong in terms
     every transport has; `code` is your own, for a client to match. It is answered `{ "error": { "code", "message" } }`.
 
@@ -605,7 +610,7 @@ counts and queue (after a restart, for one).
     chain-data headers (`X-Umbra-View`, `X-Umbra-Height`, `X-Umbra-Hash`) and headers that keep a browser from running
     them. UmbraDB's own errors (404, 405, a body that is not JSON, 500, 504) carry neither.
 
-- **Binary routes**, for a file's bytes. `defineBinaryRoute({ name, input, http?, maxAnswerBytes?, handle })` is a route whose handler
+- **Binary routes**, for a file's bytes. `defineBinaryRoute({ name, input, http?, contentType?, maxAnswerBytes?, handle })` is a route whose handler
   returns a `BinaryFile`, registered with `api.binaryRoute(route)`. It is always a `GET` (`GET /<your-module-id>/<name>`
   without `http`), and its input, errors and height are a route's.
 
@@ -630,6 +635,9 @@ counts and queue (after a restart, for one).
   - **Ranges.** A client asks for part of the file with the `Range` header or the `range` parameter, not both, in the
     header's form: `0-499`, `500-`, `-500` (the last 500 bytes). One range is answered 206 with `Content-Range`;
     several are answered whole; one past the end is 416 `range-not-satisfiable`.
+  - **`contentType`** (optional) is the media type the route's files have (`image/png`), shown in the API's
+    documentation; without it the documentation says any type. It describes the route and is not checked: each answer
+    is sent with its `BinaryFile`'s own `contentType`.
   - **`maxAnswerBytes`** (1 MiB by default) caps one answer. A request for more, whole file or range, is refused 429
     `answer-too-large`, so clients read a large file in ranges.
   - **`etag`** is sent as the `ETag`: give one that changes whenever the bytes do (a content hash). A request whose
@@ -657,8 +665,9 @@ counts and queue (after a restart, for one).
 - **Stating the height you read.** `answerChainData(read, answer)` as in §2.4. For other shapes:
   `readChainDataView(read)` gives `{ view, height, hash }`, `chainDataHeaders(view)` the three headers, and
   `withViewExtensions(body, view)` puts them in a GraphQL response's `extensions`, its `data` unchanged.
-- **Topics**, for live updates. Declare each with `defineTopic(name, schema)` in the module's `topics` (a name in
-  lowerCamelCase; a schema under a route output's rules), and emit to it from `on-db-write` with
+- **Topics**, for live updates. Declare each with `defineTopic(name, schema, { description? })` in the module's
+  `topics` (a name in lowerCamelCase; a schema under a route output's rules; one sentence the API's documentation
+  shows), and emit to it from `on-db-write` with
   `topics.emit(topic, value)`. The value is checked and written by the schema at the call, so a value it refuses fails
   the height whether or not anyone subscribes. What a height emits is sent once it commits, and dropped if it does not.
   Subscribers name a topic `<module-id>.<name>`, and get one frame per committed height, in order: every module's

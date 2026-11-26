@@ -12,9 +12,24 @@
  * Each is a zod codec, so it reads in one direction and writes in the other: a schema that holds one is parsed with
  * `z.decode` (or `parse`) and written with `z.encode`, as the core does for a route's input and output. A default is
  * given on the wire side, `bigintText().prefault("0")`: `.default(0n)` has no JSON to describe it.
+ *
+ * The catalog describes an input as either form and an output as the one written, digits in a string
+ * ({@link writtenSide}).
  */
 
 import { z } from "zod";
+
+/** What a codec's wire schema writes, where it reads more: an output is described as this. */
+const WRITTEN = new WeakMap<object, Record<string, unknown>>();
+
+/** `z.toJSONSchema`'s `override` for an output: each codec's wire side as what it writes, not all it reads. */
+export function writtenSide(context: { zodSchema: object; jsonSchema: object }): void {
+  const written = WRITTEN.get(context.zodSchema);
+  if (written === undefined) return;
+  const schema = context.jsonSchema as Record<string, unknown>;
+  for (const key of ["anyOf", "type", "pattern", "minimum"]) delete schema[key];
+  Object.assign(schema, written);
+}
 
 /** The most digits of an integer these schemas take. */
 export const MAX_DIGITS = 78;
@@ -44,6 +59,7 @@ function integerText(signed: boolean, most: number, expected: string, accepts: (
     .unknown()
     .refine(isInteger, message)
     .meta({ anyOf: [{ type: "string", pattern }, { type: "integer", ...(signed ? {} : { minimum: 0 }) }], format: "bigint" });
+  WRITTEN.set(wire, { type: "string", pattern });
   return z
     .codec(wire, z.bigint(), { decode: (value) => BigInt(value as string | number | bigint), encode: (value) => value.toString() })
     .refine(accepts, message);

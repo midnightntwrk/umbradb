@@ -26,7 +26,7 @@ export const MAX_GROUP_MEMBERS = 100;
 /** 32 bytes: `0x` and 64 lowercase hex digits. */
 export const hash32 = () => hashHex().describe("32 bytes as 0x-prefixed lowercase hex");
 /** A token's kind: 1 shielded UTXO, 2 unshielded UTXO, 3 contract token. */
-export const Kind = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+export const Kind = z.union([z.literal(1), z.literal(2), z.literal(3)]).describe("1 shielded UTXO, 2 unshielded UTXO, 3 contract token");
 export type Kind = z.output<typeof Kind>;
 
 /** A `UInt` value (MIP-0018 value type 2): up to 31 bytes, so 248 bits. */

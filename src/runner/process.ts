@@ -340,6 +340,7 @@ import {
   refuseChannelNotServing,
   refuseNotServing,
 } from "./api-answers.js";
+import type { ApiDocs } from "./api-docs.js";
 import { type FetchHandler, type MountedApiSeams, type StartedModuleApi, startModuleApi } from "./api-server.js";
 import { TopicBus } from "./topic-bus.js";
 import { followAll } from "./transaction-follower.js";
@@ -2205,6 +2206,7 @@ class Process implements ProcessHandle {
       db,
       ...(address === undefined ? {} : { address }),
       apiReadTimeoutMs: settings.apiReadTimeoutMs as number,
+      docs: settings.apiDocs as ApiDocs,
       configHash,
       onError: (error, where) => this.#log(`module API: ${where.route} of ${where.module} failed: ${messageOf(error)}`),
       ...(input.mountedApi === undefined ? {} : { mounted: input.mountedApi }),

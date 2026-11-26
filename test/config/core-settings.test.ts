@@ -57,6 +57,7 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   tls: ["secret", "absent"],
   livenessTimeoutMs: ["operational", { default: 30_000 }],
   apiReadTimeoutMs: ["operational", { default: 30_000 }],
+  apiDocs: ["operational", { default: "off" }],
   slowBlockMs: ["operational", { default: 60_000 }],
   followingThreshold: ["operational", { default: 3 }],
   readinessLag: ["operational", "absent"],

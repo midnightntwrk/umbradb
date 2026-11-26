@@ -29,13 +29,16 @@ export const topicId = (module: string, topic: string): string => `${module}.${t
 /** The topic bus (see the module comment). */
 export class TopicBus implements TransactionFollower {
   readonly #topics: ReadonlySet<string>;
+  /** The topics of the parts this process runs, as declared: what the API's documentation describes. */
+  readonly declared: readonly { readonly module: string; readonly topic: Topic }[];
   readonly #pending = new Map<bigint, Message[]>();
   readonly #subscribers = new Map<TopicSubscriber, Set<string>>();
   #height: bigint | null;
 
   /** Over the topics of `parts` (those this process runs), with `committed` the cursor's height. */
   constructor(parts: readonly ModuleDeclaration[] = [], committed: bigint | null = null) {
-    this.#topics = new Set(parts.flatMap((part) => (part.topics ?? []).map((topic) => topicId(part.id, topic.name))));
+    this.declared = Object.freeze(parts.flatMap((part) => (part.topics ?? []).map((topic) => Object.freeze({ module: part.id, topic }))));
+    this.#topics = new Set(this.declared.map(({ module, topic }) => topicId(module, topic.name)));
     this.#height = committed;
   }
 

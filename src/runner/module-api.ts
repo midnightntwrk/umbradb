@@ -55,6 +55,9 @@
  *   fixed message, so no exception text, which may hold a credential, reaches a client. The error itself goes to
  *   `onError`.
  *
+ * **Documentation.** With `apiDocs` on, the module API answers the paths of `./api-docs.ts` (the OpenAPI and AsyncAPI
+ * documents, and their UIs) without a read. No module may register them.
+ *
  * **Topics** are not registered here: modules declare them, and {@link ModuleApi.topics} is the process's bus
  * (`./topic-bus.ts`), which the subscription protocol (`./api-session.ts`) serves.
  */
@@ -65,6 +68,7 @@ import { parseJsonLossless } from "../deterministic-postgresql/index.js";
 import type { ApiRegistry, RequestHeaders } from "../modules/declaration.js";
 import type { ResolvedGraph } from "../modules/graph.js";
 import type { BinaryRoute, Route } from "../modules/route.js";
+import { type ApiDocs, DocsAnswers, docsPaths } from "./api-docs.js";
 import { encodeJson, readExactNumber, UnreadableNumber } from "./api-json.js";
 import { runSchedule, seriesOf } from "./dispatch.js";
 import type { ChainDataAnswer } from "./envelope.js";
@@ -218,6 +222,14 @@ const shapeOf = (route: HttpRoute): string =>
 export class ApiRoutes {
   readonly #registrations: Registration[] = [];
   readonly #routes = new Map<string, RouteEntry>();
+  /** The `apiDocs` setting: what documentation the module API serves. */
+  readonly docs: ApiDocs;
+  readonly #reserved: ReadonlySet<string>;
+
+  constructor(options: { readonly docs?: ApiDocs } = {}) {
+    this.docs = options.docs ?? "off";
+    this.#reserved = new Set(docsPaths(this.docs));
+  }
 
   /** The routes registered with `registry.route`, in registration order: the catalog every transport serves from. */
   get routes(): readonly RouteEntry[] {
@@ -242,6 +254,9 @@ export class ApiRoutes {
         throw new TypeError(`${module} registered the method ${String(method)}, which is neither GET nor POST`);
       }
       const segments = parsePath(module, method, path);
+      if (this.#reserved.has(`/${segments.map((segment) => ("literal" in segment ? segment.literal : ":")).join("/")}`)) {
+        throw new TypeError(`${module} registered ${method} ${path}, where the core serves the API's documentation (apiDocs)`);
+      }
       if (typeof handler !== "function") {
         throw new TypeError(`${module} registered ${method} ${path} with a handler that is not a function`);
       }
@@ -315,14 +330,16 @@ const specificity = (route: HttpRoute): string => route.segments.map((segment) =
 /** The module API over checked routes (see the module comment). */
 export class ModuleApi {
   readonly #http: readonly HttpRoute[];
+  readonly #docs: DocsAnswers;
   readonly #options: ModuleApiOptions;
   /** The process's topic bus, which subscriptions are served from. */
   readonly topics: TopicBus;
 
   constructor(routes: ApiRoutes, options: ModuleApiOptions) {
     this.#http = routes.http;
-    this.#options = options;
     this.topics = options.topics ?? new TopicBus();
+    this.#docs = new DocsAnswers(routes.docs, routes.routes, this.topics.declared);
+    this.#options = options;
   }
 
   /** Answers `request` (see the module comment); never rejects. */
@@ -332,6 +349,11 @@ export class ModuleApi {
       segments = request.path === "/" ? [] : request.path.slice(1).split("/").map(decodeURIComponent);
     } catch {
       return apiErrorResponse("invalid-request", "the request path is not valid percent-encoded UTF-8");
+    }
+    if (request.path.startsWith("/") && this.#docs.serves(`/${segments.join("/")}`)) {
+      if (request.method !== "GET") return apiErrorResponse("method-not-allowed", "this path answers GET, not this method", { Allow: "GET" });
+      const answered = this.#docs.answer(`/${segments.join("/")}`);
+      return answered === null ? apiErrorResponse("not-found", "this build carries no Swagger UI") : { ...answered, headers: { ...answered.headers } };
     }
     const candidates = request.path.startsWith("/") ? this.#http.filter((route) => matches(route, segments)) : [];
     if (candidates.length === 0) {

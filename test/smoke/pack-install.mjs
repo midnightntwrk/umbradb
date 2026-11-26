@@ -5,8 +5,10 @@
  *
  *   Without Docker (always run):
  *     1. `npm pack`: the tarball ships `dist/index.d.ts` and the vendored ledger packages — for each ledger version its
- *        `SHA256SUMS`, `upstream.json` and every `pkg/` file the manifest lists, and nothing else of `vendor/` (without
- *        them an installed process refuses or halts once `core-block-parsed` runs: `src/ledger/load.ts` imports them);
+ *        `SHA256SUMS`, `upstream.json` and every `pkg/` file the manifest lists (without them an installed process
+ *        refuses or halts once `core-block-parsed` runs: `src/ledger/load.ts` imports them) — and the vendored API docs
+ *        UIs, each with its `SHA256SUMS`, `upstream.json` and every file its manifest lists (`apiDocs: "ui"` serves
+ *        them: `src/runner/api-docs.ts`), and nothing else of `vendor/`;
  *     1b. nothing of `legacy/` and nothing of TransactionHistory in the tarball;
  *     2. the tarball installed in the scratch project;
  *     3. a deep import (`umbradb/dist/runner/process.js`) fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`: `exports` names
@@ -84,6 +86,9 @@ const MODULE_TEST = "examples/try-module/try-module.ts";
 /** The ledger versions the build carries: each a directory of `vendor/ledger/`. */
 const LEDGERS = ["v8", "v9-rc3", "v9-rc5", "v9"];
 
+/** The API docs UIs the build carries (`scripts/vendor-web-ui.mjs`): each a directory of `vendor/`. */
+const WEB_UIS = ["swagger-ui", "asyncapi-react"];
+
 /** The retired names whose import must fail: 0.9.5's storage parts and TransactionHistory's. */
 const RETIRED_VALUES = [
   "PgTemporalKV", "PgCheckpointStore", "PgWatermarks", "PgTransactionLeaseLayer", "PgWalletStateEnvelopeStore",
@@ -125,7 +130,7 @@ function configFile({ start, genesis, node, database }) {
 
 /** Oracles 1–4 (see the module comment): no Docker needed. */
 async function dockerIndependentOracles() {
-  // ---- 1. npm pack: dist/index.d.ts and the vendored ledger packages ship ------------------------------------------
+  // ---- 1. npm pack: dist/index.d.ts, the vendored ledger packages and the API docs UIs ship -------------------------
   const pack = run("npm", ["pack", "--json", "--pack-destination", scratch], { cwd: repoRoot });
   if (pack.status !== 0) fail(`npm pack failed:\n${pack.stderr}`);
   let entry;
@@ -138,19 +143,23 @@ async function dockerIndependentOracles() {
   const shipped = (entry.files ?? []).map((f) => f.path);
   if (!shipped.includes("dist/index.d.ts")) fail(`dist/index.d.ts is NOT in the packed tarball. Shipped:\n${shipped.join("\n")}`);
   const vendored = new Set();
-  for (const ledger of LEDGERS) {
-    const base = `vendor/ledger/${ledger}`;
+  /** Requires `base`'s manifest, `upstream.json` and every file the manifest lists in the tarball. */
+  const shipsManifest = (base, what) => {
     const manifest = readFileSync(join(repoRoot, base, "SHA256SUMS"), "utf8").trim().split("\n");
     const expected = [`${base}/SHA256SUMS`, `${base}/upstream.json`, ...manifest.map((line) => `${base}/${line.slice(66)}`)];
     const missing = expected.filter((path) => !shipped.includes(path));
-    if (missing.length > 0) {
-      fail(`the packed tarball lacks the vendored ledger ${ledger} package's files (src/ledger/load.ts imports them):\n${missing.join("\n")}`);
-    }
+    if (missing.length > 0) fail(`the packed tarball lacks ${what}'s files:\n${missing.join("\n")}`);
     for (const path of expected) vendored.add(path);
-  }
+  };
+  for (const ledger of LEDGERS) shipsManifest(`vendor/ledger/${ledger}`, `the vendored ledger ${ledger} package (src/ledger/load.ts imports them)`);
+  const ledgerFiles = vendored.size;
+  for (const ui of WEB_UIS) shipsManifest(`vendor/${ui}`, `the vendored ${ui} UI (src/runner/api-docs.ts serves them)`);
   const strayVendor = shipped.filter((p) => p.startsWith("vendor/") && !vendored.has(p));
-  if (strayVendor.length > 0) fail(`the packed tarball holds vendor/ files beyond the ledger packages:\n${strayVendor.join("\n")}`);
-  console.log(`pack-install smoke: packed ${entry.filename}: dist/index.d.ts and the ${vendored.size} files of the vendored ledger packages (${LEDGERS.join(", ")}), nothing else of vendor/.`);
+  if (strayVendor.length > 0) fail(`the packed tarball holds vendor/ files beyond the ledger packages and the API docs UIs:\n${strayVendor.join("\n")}`);
+  console.log(
+    `pack-install smoke: packed ${entry.filename}: dist/index.d.ts, the ${ledgerFiles} files of the vendored ledger packages (${LEDGERS.join(", ")}) ` +
+      `and the ${vendored.size - ledgerFiles} of the API docs UIs (${WEB_UIS.join(", ")}), nothing else of vendor/.`,
+  );
 
   // ---- 1b. nothing of legacy/ and nothing of TransactionHistory --------------------------------------------
   const kept = shipped.filter(

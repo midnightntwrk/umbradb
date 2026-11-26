@@ -49,6 +49,7 @@ import {
   type RouteErrorKind,
   type RouteHttp,
 } from "../modules/route.js";
+import { writtenSide } from "../helpers/bigint-text.js";
 import { encodeAsciiJson, readExactNumber } from "./api-json.js";
 import { CHAIN_DATA_HEADERS, chainDataHeaders, NO_COMMITTED_HEIGHT_STATUS, readChainDataView } from "./envelope.js";
 
@@ -70,6 +71,8 @@ export interface RouteEntry {
   readonly http: RouteHttp;
   /** `binary` for a binary route, whose answer is bytes (`./route-binary.ts`). */
   readonly kind: "json" | "binary";
+  /** A binary route's declared media type, if it gives one. */
+  readonly contentType?: string;
   /** The declaration itself. */
   readonly route: AnyRoute | AnyBinaryRoute;
 }
@@ -219,8 +222,8 @@ function jsonSchemaOf(route: AnyRoute | AnyBinaryRoute, side: "input" | "output"
   const schema: unknown = (route as Partial<Record<"input" | "output", unknown>>)[side];
   if (!isRecord(schema) || typeof schema.safeParse !== "function" || !("_zod" in schema)) throw refuse(`whose ${side} is not a zod schema`);
   try {
-    // A schema's wire side is its input side, whichever way the route uses it.
-    return Object.freeze(z.toJSONSchema(schema as unknown as z.ZodType, { io: "input" }));
+    // A schema's wire side is its input side, whichever way the route uses it; an output shows only what is written.
+    return Object.freeze(z.toJSONSchema(schema as unknown as z.ZodType, { io: "input", ...(side === "output" ? { override: writtenSide } : {}) }));
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     const fix = /default/i.test(why)

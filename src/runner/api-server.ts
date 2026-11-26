@@ -15,7 +15,8 @@ import type { PrivateLinkChannel } from "../library/channels.js";
 import { coreHeaders } from "./api-answers.js";
 import { connectChannel, connectionRules, type FetchHandler, moduleApiFetch, type ModuleApiLimits, type ServedConnection } from "./api-session.js";
 import { listenModuleApi, type ModuleApiHandlers, moduleApiHandlers, type ModuleApiServer } from "./api-socket.js";
-import { type ApiRoutes, type ApiStartup, ModuleApi, type ModuleApiOptions, registerModuleApis } from "./module-api.js";
+import type { ApiDocs } from "./api-docs.js";
+import { ApiRoutes, type ApiStartup, ModuleApi, type ModuleApiOptions, registerModuleApis } from "./module-api.js";
 
 export { CONFIG_HASH_HEADER, type NodeHttpHandler, type NodeUpgradeHandler, VERSION_HEADER } from "./api-answers.js";
 export {
@@ -66,6 +67,8 @@ export interface ModuleApiStart extends ApiStartup {
   readonly mounted?: MountedApiSeams;
   /** The process's topic bus, which subscriptions are served from; one with no topics unless given. */
   readonly topics?: ModuleApiOptions["topics"];
+  /** `apiDocs`; ignored when `routes` is given. */
+  readonly docs?: ApiDocs;
 }
 
 /** The module API started. */
@@ -93,7 +96,7 @@ export interface StartedModuleApi {
  * the first failure of either.
  */
 export async function startModuleApi(input: ModuleApiStart): Promise<StartedModuleApi> {
-  const routes = await registerModuleApis(input, input.routes);
+  const routes = await registerModuleApis(input, input.routes ?? new ApiRoutes(input.docs === undefined ? {} : { docs: input.docs }));
   const options: ModuleApiOptions = {
     db: input.db,
     timeoutMs: input.apiReadTimeoutMs,

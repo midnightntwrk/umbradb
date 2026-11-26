@@ -1,0 +1,11 @@
+{
+  "package": "@asyncapi/react-component",
+  "version": "3.2.3",
+  "integrity": "sha512-/hnh4xIKo78/uuklIVu55sbDIw4aLOyJeSaoy//FnMtEZzEGAbl29fq46yyXqP/MpFnj+Tq8rDk3P1oT/QUKGw==",
+  "files": {
+    "asyncapi-standalone.js": "browser/standalone/index.js",
+    "asyncapi-standalone.js.LICENSE.txt": "browser/standalone/index.js.LICENSE.txt",
+    "asyncapi.css": "styles/default.min.css",
+    "LICENSE.upstream": "LICENSE"
+  }
+}

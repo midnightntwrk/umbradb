@@ -28,13 +28,16 @@ export const DEFAULT_MAX_ANSWER_BYTES = 1_048_576;
 /** The catalog's description of the core's parameters and of a binary answer. */
 const RANGE_SCHEMA: JsonSchema = Object.freeze({
   type: "string",
-  description: "A byte range, as the Range header writes one: 0-499, 500- or -500 (bytes= optional).",
+  description: "A byte range, as the Range header writes one: 0-499, 500- or -500 (bytes= optional). May be sent as the Range header instead, not both.",
 });
 const IF_MATCH_SCHEMA: JsonSchema = Object.freeze({
   type: "string",
-  description: 'Answer only if the file\'s ETag is one of these, as the If-Match header writes them: *, "9f2c…", "41ab…" (or 9f2c… bare).',
+  description: 'Answer only if the file\'s ETag is one of these, as the If-Match header writes them: *, "9f2c…", "41ab…" (or 9f2c… bare). May be sent as the If-Match header instead, not both.',
 });
 const BINARY_OUTPUT: JsonSchema = Object.freeze({ type: "string", contentEncoding: "binary" });
+
+/** A media type: `type/subtype`, then any parameters (RFC 9110 §8.3.1). */
+const MEDIA_TYPE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+(\s*;[\x20-\x7e]*)?$/;
 
 /** An entity-tag's characters, `"` aside (RFC 9110 §8.8.3). */
 const ETAG = /^[\x21\x23-\x7e]+$/;
@@ -101,6 +104,10 @@ export function bindBinaryRoute(module: string, route: AnyBinaryRoute): BoundRou
   const given: unknown = route.maxAnswerBytes ?? DEFAULT_MAX_ANSWER_BYTES;
   if (typeof given !== "number" || !Number.isSafeInteger(given) || given < 1) throw bound.refuse("whose maxAnswerBytes is not a positive safe integer");
   const max: number = given;
+  const contentType: unknown = route.contentType;
+  if (contentType !== undefined && (typeof contentType !== "string" || !MEDIA_TYPE.test(contentType))) {
+    throw bound.refuse(`whose contentType is not a media type (type/subtype, then any parameters): ${JSON.stringify(contentType)}`);
+  }
   const entry: RouteEntry = Object.freeze({
     module,
     name: bound.name,
@@ -110,6 +117,7 @@ export function bindBinaryRoute(module: string, route: AnyBinaryRoute): BoundRou
     output: BINARY_OUTPUT,
     http: bound.http,
     kind: "binary",
+    ...(contentType === undefined ? {} : { contentType }),
     route,
   });
 
