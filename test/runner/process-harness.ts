@@ -14,6 +14,7 @@ import { FinalizedLoop, type LoopInput } from "../../src/runner/loop.js";
 import { isBackbonePart } from "../../src/runner/dispatch.js";
 import { ApiRoutes, type ModuleApi } from "../../src/runner/module-api.js";
 import { ProcessContexts } from "../../src/runner/process-context.js";
+import { TopicBus } from "../../src/runner/topic-bus.js";
 import { CORE_CHAIN } from "../modules/graph-fixtures.js";
 import { LOOP_BACKBONE } from "./loop-harness.js";
 
@@ -135,7 +136,13 @@ export async function startProcess(
 ): Promise<Process> {
   const { graph, plan, contexts } = await startThroughSeal(db, user, entries, options);
   const listen = options.listen === undefined ? "127.0.0.1:0" : options.listen;
+  const cursor = (await db.read((read) => readCursor(read)))?.height ?? null;
+  const running = new Set(graph.ranges.flatMap((range) => range.order.map((part) => part.id)));
   const started = await startModuleApi({
+    topics: new TopicBus(
+      graph.modules.filter((part) => running.has(part.id)),
+      cursor,
+    ),
     graph,
     contexts,
     db: options.apiDb ?? db,
@@ -166,13 +173,18 @@ export async function startProcess(
   };
 }
 
-/** The loop's input over `process` and `source`, stopped by `controller`: the process's contexts and misuse reports. */
+/**
+ * The loop's input over `process` and `source`, stopped by `controller`: the process's contexts and misuse reports, and
+ * its topic bus when it serves a module API.
+ */
 export function processLoopInput(
-  process: Pick<Process, "db" | "graph" | "plan" | "contexts">,
+  process: Pick<Process, "db" | "graph" | "plan" | "contexts"> & { readonly api?: ModuleApi },
   source: InMemoryBlockSource,
   controller: AbortController,
 ): LoopInput {
+  const topics = process.api?.topics;
   return {
+    ...(topics === undefined ? {} : { topics, follower: topics }),
     db: process.db,
     graph: process.graph,
     plan: process.plan,
@@ -185,7 +197,7 @@ export function processLoopInput(
 
 /** Runs the loop over `process` and `source` until it waits for a head above `above`; rejects with its failure. */
 export async function runLoop(
-  process: Pick<Process, "db" | "graph" | "plan" | "contexts">,
+  process: Pick<Process, "db" | "graph" | "plan" | "contexts"> & { readonly api?: ModuleApi },
   source: InMemoryBlockSource,
   above: bigint,
 ): Promise<void> {

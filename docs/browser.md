@@ -135,7 +135,7 @@ The page's Back up button saves a backup of the database as a file; the `restore
 `await umbradb.core.call("admin", "/status")` answers what `/status` answers, and
 `await umbradb.core.call("api", { method: "GET", path: "/your/route" })` what the module API answers.
 `const api = await umbradb.core.openApi()` opens a channel of the module API's subscriptions: `api.send({ type:
-"subscribe", id: "1", name: "<subscription>" })`, then read `api.received`. `umbradb.links` lists the private link's
+"subscribe", topics: ["<module-id>.<topic>"] })`, then read `api.received`. `umbradb.links` lists the private link's
 channels, and `umbradb.dropLink("<instance id>")` drops one, as a lost connection would: the instance connects again
 over a new channel.
 

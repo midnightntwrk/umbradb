@@ -320,11 +320,11 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
           handleHeight: before,
           rows: prior,
         });
-        // on-db-write: (p, b, w), the block write handle, reporting the cursor before the block.
+        // on-db-write: (p, b, w, topics), the block write handle, reporting the cursor before the block.
         expect(of("on-db-write")).toEqual({
           point: "on-db-write",
           height: h,
-          args: 3,
+          args: 4,
           keys: ["execute", "height", "query"],
           handleHeight: before,
         });
@@ -715,7 +715,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       if (write === undefined) return d;
       const points = {
         ...d.points,
-        async "on-db-write"(p: Parameters<typeof write>[0], b: BlockContext, w: BlockWriteHandle) {
+        async "on-db-write"(p: Parameters<typeof write>[0], b: BlockContext, w: BlockWriteHandle, t: Parameters<typeof write>[3]) {
           const counting: BlockWriteHandle = {
             height: w.height,
             query: (sql, params) => w.query(sql, params),
@@ -725,7 +725,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
               return n;
             },
           };
-          await write.call(d.points, p, b, counting);
+          await write.call(d.points, p, b, counting, t);
         },
       };
       return { ...d, points };

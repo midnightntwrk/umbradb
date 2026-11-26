@@ -7,7 +7,9 @@ import { mountedAdminFetch } from "../../src/admin/mounted.js";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
 import type { ReadHandle } from "../../src/db/api.js";
 import type { PrivateLinkChannel } from "../../src/library/channels.js";
-import type { ApiRegistry } from "../../src/modules/declaration.js";
+import { z } from "zod";
+import type { ApiRegistry, ModuleDeclaration } from "../../src/modules/declaration.js";
+import { defineTopic } from "../../src/modules/topic.js";
 import { coreHeaders, notServingResponse, refuseChannelNotServing } from "../../src/runner/api-answers.js";
 import {
   answerRequest,
@@ -20,6 +22,7 @@ import {
 } from "../../src/runner/api-session.js";
 import { listenModuleApi, moduleApiHandlers } from "../../src/runner/api-socket.js";
 import { ApiRoutes, ModuleApi } from "../../src/runner/module-api.js";
+import { TopicBus } from "../../src/runner/topic-bus.js";
 import { channelPair, until } from "../library/channel-fixtures.js";
 import { Client } from "../library/mounted-fixtures.js";
 
@@ -31,7 +34,7 @@ import { Client } from "../library/mounted-fixtures.js";
  * be held to the limit), one absent being no limit, a carrier without `terminate` — and the lifecycle's
  * and admin's fetch-style answers.
  *
- * A client's malformed message — any JSON value where an id or a field is expected, objects whose conversion to text
+ * A client's malformed message — any JSON value where a type or topics are expected, objects whose conversion to text
  * throws among them — is answered `invalid-request` and the connection goes on, on each carrier of the protocol: a
  * host's channel (the engine's `api.connect`), the handlers mounted in a host's server (`api.upgrade`) and the listener
  * (`listen.api`); and, as a property, on the session itself.
@@ -40,20 +43,34 @@ import { Client } from "../library/mounted-fixtures.js";
 const read: ReadHandle = Object.freeze({ height: 7n, query: async () => [] }) as unknown as ReadHandle;
 const db = { read: <T>(body: (r: ReadHandle) => Promise<T>) => body(read) };
 
-/** A module API with one route per answer a test needs, and the subscription `feed`, whose emits are `emits`. */
-function api(emits: Set<(value: unknown) => void>): ModuleApi {
+const FEED = defineTopic("feed", z.string());
+const M = { id: "m", topics: [FEED] } as unknown as ModuleDeclaration;
+const SUBSCRIBE = { type: "subscribe", topics: ["m.feed"] };
+
+/** Module `m`'s topic `feed` on a bus at height 0; `held(value)` stages the next height and returns its sync commit. */
+function feed() {
+  const bus = new TopicBus([M], 0n);
+  let height = 0n;
+  return {
+    bus,
+    async held(value: string): Promise<() => void> {
+      const block = { height: ++height, hash: Uint8Array.of(1) };
+      await bus.collect(M, block.height, async (sink) => sink.emit(FEED, value), () => undefined);
+      return () => bus.committed(block);
+    },
+  };
+}
+
+/** A module API with one route per answer a test needs, serving `bus`'s topics. */
+function api(bus: TopicBus = feed().bus): ModuleApi {
   const routes = new ApiRoutes();
   const registration = routes.open("m");
   const registry: ApiRegistry = registration.registry;
   registry.http("GET", "/none", async () => ({ status: 204, body: "" }));
   registry.http("GET", "/named", async () => ({ status: 200, headers: { "x-umbra-version": "a module's own", "X-Kept": "yes" }, body: { a: 1 } }));
-  registry.subscription("feed", (_args, emit) => {
-    emits.add(emit);
-    return () => emits.delete(emit);
-  });
   registration.close();
   routes.check();
-  return new ModuleApi(routes, { db, timeoutMs: 1_000 });
+  return new ModuleApi(routes, { db, timeoutMs: 1_000, topics: bus });
 }
 
 /** A channel whose members do what `overrides` says, the rest of them as a test-owned channel's. */
@@ -127,7 +144,7 @@ function unreadableAmount(kind: "getter" | "method") {
 
 describe("the module API's session logic", () => {
   it("the fetch-style handler: a body whose stream fails is refused 400; an answer without a body has none; the core's headers replace a module's own", async () => {
-    const fetch = moduleApiFetch(api(new Set()), { core: coreHeaders("0xhash") });
+    const fetch = moduleApiFetch(api(), { core: coreHeaders("0xhash") });
     const failing = new Request("http://module-api/named", {
       method: "POST",
       body: new ReadableStream({ pull: (controller) => controller.error(new Error("the stream broke")) }),
@@ -141,10 +158,10 @@ describe("the module API's session logic", () => {
     expect([named.headers.get("x-umbra-version"), named.headers.get("x-umbra-config-hash"), named.headers.get("x-kept")]).toEqual([UMBRADB_VERSION, "0xhash", "yes"]);
     expect(await named.json()).toEqual({ a: 1 });
     // Without the core's headers (a negative control's), the module's own stays.
-    const bare = responseOf(await api(new Set()).answer({ method: "GET", path: "/named" }), null);
+    const bare = responseOf(await api().answer({ method: "GET", path: "/named" }), null);
     expect(bare.headers.get("x-umbra-version")).toBe("a module's own");
     // A URL the transport could not read.
-    expect((await answerRequest(api(new Set()), "GET", undefined, "")).status).toBe(400);
+    expect((await answerRequest(api(), "GET", undefined, "")).status).toBe(400);
   });
 
   it("the lifecycle's answers: a 503 Response with the core's headers; a channel told and closed, also one that throws", async () => {
@@ -166,9 +183,9 @@ describe("the module API's session logic", () => {
     expect(() => refuseChannelNotServing(channel, { state: "starting", reason: null })).not.toThrow();
   });
 
-  it("a channel connection: a send that throws ends it after the emit; an absent or unknown bufferedAmount is no limit; no terminate is a close", async () => {
-    const emits = new Set<(value: unknown) => void>();
-    const module = api(emits);
+  it("a channel connection: a send that throws ends it after the frame; an absent or unknown bufferedAmount is no limit; no terminate is a close", async () => {
+    const topics = feed();
+    const module = api(topics.bus);
     const rules = connectionRules({ maxBufferedBytes: 10 });
     // A send that throws once the subscription is open, on a carrier without bufferedAmount (it bounds its own queue).
     let fails = false;
@@ -181,13 +198,14 @@ describe("the module API's session logic", () => {
       },
     });
     connectChannel(channel, module, { rules, ended: () => (ended += 1) });
-    peer.send(JSON.stringify({ type: "subscribe", id: "s", name: "feed" }));
+    peer.send(JSON.stringify(SUBSCRIBE));
     await until(() => sent.length === 1, "subscribed");
+    const first = await topics.held("x".repeat(100));
     fails = true;
-    for (const emit of [...emits]) emit("x".repeat(100));
-    // Not unsubscribed inside the emit; ended once, after it.
-    expect(emits.size).toBe(1);
-    await until(() => emits.size === 0 && ended === 1, "the throwing carrier ended");
+    first();
+    // Not detached inside the commit; ended once, after it.
+    expect(topics.bus.subscriberCount).toBe(1);
+    await until(() => topics.bus.subscriberCount === 0 && ended === 1, "the throwing carrier ended");
 
     // A bufferedAmount that is no number is read as unknown: the value is sent. A carrier without terminate is closed.
     let held: unknown = Number.NaN;
@@ -196,13 +214,13 @@ describe("the module API's session logic", () => {
     let closes = 0;
     const closing = second.channel.close;
     const connection = connectChannel({ ...second.channel, close: () => ((closes += 1), closing()) }, module, { rules });
-    second.peer.send(JSON.stringify({ type: "subscribe", id: "t", name: "feed" }));
+    second.peer.send(JSON.stringify(SUBSCRIBE));
     await until(() => out.length === 1, "subscribed again");
-    for (const emit of [...emits]) emit("y".repeat(100));
+    (await topics.held("y".repeat(100)))();
     expect(out).toHaveLength(2);
     held = 1_000;
-    for (const emit of [...emits]) emit("z");
-    await until(() => emits.size === 0, "the slow subscriber unsubscribed");
+    (await topics.held("z"))();
+    await until(() => topics.bus.subscriberCount === 0, "the slow subscriber detached");
     expect([out.length, closes]).toEqual([2, 1]);
     // The connection's own close after its end does nothing more.
     await connection.close();
@@ -210,53 +228,54 @@ describe("the module API's session logic", () => {
   });
 
   it.each(["getter", "method"] as const)(
-    "a channel whose bufferedAmount %s throws has ended: nothing thrown into the carrier's listener or out of a module's emit, nothing sent after, closed once and its subscriptions unsubscribed after the emit",
+    "a channel whose bufferedAmount %s throws has ended: nothing thrown into the carrier's listener or out of a commit, nothing sent after, closed once and detached after the commit",
     async (kind) => {
       const rules = connectionRules({});
       // The answer to a client's message, inside the carrier's own message listener.
       {
         const { channel, state } = unreadableAmount(kind);
         let ended = 0;
-        connectChannel(channel, api(new Set()), { rules, ended: () => (ended += 1) });
+        connectChannel(channel, api(), { rules, ended: () => (ended += 1) });
         state.fails = true;
         expect(() => state.heard?.("not json")).not.toThrow();
         expect([state.sent, ended, state.closes]).toEqual([[], 0, 0]);
         await settle();
         expect([ended, state.closes, state.heard, state.reads]).toEqual([1, 1, undefined, 1]);
       }
-      // A module's emit: nothing unsubscribed or closed inside it, nothing read or sent after; the module API's close
-      // after the end does nothing more.
+      // A height's frame: nothing detached or closed inside its commit, nothing read or sent after; the module API's
+      // close after the end does nothing more.
       {
-        const emits = new Set<(value: unknown) => void>();
+        const topics = feed();
         const { channel, state } = unreadableAmount(kind);
         let ended = 0;
-        const connection = connectChannel(channel, api(emits), { rules, ended: () => (ended += 1) });
-        state.heard?.(JSON.stringify({ type: "subscribe", id: "s", name: "feed" }));
-        expect(state.sent.map((text) => JSON.parse(text))).toEqual([{ type: "subscribed", id: "s" }]);
+        const connection = connectChannel(channel, api(topics.bus), { rules, ended: () => (ended += 1) });
+        state.heard?.(JSON.stringify(SUBSCRIBE));
+        expect(state.sent.map((text) => JSON.parse(text))).toEqual([{ type: "subscribed", topics: ["m.feed"], height: "0" }]);
+        const x = await topics.held("x");
+        const y = await topics.held("y");
         state.fails = true;
         state.reads = 0;
-        for (const emit of [...emits]) {
-          expect(() => emit("x")).not.toThrow();
-          expect(() => emit("y")).not.toThrow();
-        }
-        expect([emits.size, ended, state.closes, state.sent.length]).toEqual([1, 0, 0, 1]);
+        expect(x).not.toThrow();
+        expect(y).not.toThrow();
+        expect([topics.bus.subscriberCount, ended, state.closes, state.sent.length]).toEqual([1, 0, 0, 1]);
         await settle();
-        expect([emits.size, ended, state.closes, state.sent.length, state.reads]).toEqual([0, 1, 1, 1, 1]);
+        expect([topics.bus.subscriberCount, ended, state.closes, state.sent.length, state.reads]).toEqual([0, 1, 1, 1, 1]);
         await connection.close();
         expect([ended, state.closes]).toEqual([1, 1]);
       }
       // The module API's close in the same turn as the failed read: closed and ended once.
       {
-        const emits = new Set<(value: unknown) => void>();
+        const topics = feed();
         const { channel, state } = unreadableAmount(kind);
         let ended = 0;
-        const connection = connectChannel(channel, api(emits), { rules, ended: () => (ended += 1) });
-        state.heard?.(JSON.stringify({ type: "subscribe", id: "s", name: "feed" }));
+        const connection = connectChannel(channel, api(topics.bus), { rules, ended: () => (ended += 1) });
+        state.heard?.(JSON.stringify(SUBSCRIBE));
+        const x = await topics.held("x");
         state.fails = true;
-        for (const emit of [...emits]) emit("x");
+        x();
         await connection.close();
         await settle();
-        expect([emits.size, ended, state.closes]).toEqual([0, 1, 1]);
+        expect([topics.bus.subscriberCount, ended, state.closes]).toEqual([0, 1, 1]);
       }
     },
   );
@@ -273,7 +292,7 @@ describe("the module API's session logic", () => {
         throw new Error("nor a close");
       },
     });
-    expect(() => connectChannel(channel, api(new Set()), { rules: connectionRules({}), ended: () => (ended += 1) })).not.toThrow();
+    expect(() => connectChannel(channel, api(), { rules: connectionRules({}), ended: () => (ended += 1) })).not.toThrow();
     expect([closes, ended]).toEqual([1, 1]);
   });
 
@@ -292,30 +311,28 @@ describe("the module API's session logic", () => {
   });
 });
 
-/** Values a client sends where an id or a field is expected whose conversion to text throws (`String(value)`). */
+/** Values a client sends where a type or topics are expected whose conversion to text throws (`String(value)`). */
 const POISONED: readonly unknown[] = [{ toString: null }, { toString: {}, valueOf: {} }, [{ toString: null }]];
 
 /** The messages of a malformed client, then a valid `subscribe`, and the answers each gets, in order. */
 const MALFORMED_CLIENT: readonly { readonly sent: unknown; readonly answer: unknown }[] = [
-  ...POISONED.map((id) => ({
-    sent: { type: "unsubscribe", id },
-    answer: {
-      type: "error",
-      error: { code: "invalid-request", message: `an unsubscribe message's id is a string, not ${Array.isArray(id) ? "a list" : "an object"}` },
-    },
+  ...POISONED.map((topics) => ({
+    sent: { type: "unsubscribe", topics },
+    answer: { type: "error", error: { code: "invalid-request", message: "unsubscribe takes topics, a list of strings" } },
   })),
-  ...POISONED.map((id) => ({
-    sent: { type: "subscribe", id, name: "feed" },
-    answer: {
-      type: "error",
-      error: { code: "invalid-request", message: "a subscribe message has an id, a string of 1 to 128 characters, and a name, a string" },
-    },
+  ...POISONED.map((topics) => ({
+    sent: { type: "subscribe", topics },
+    answer: { type: "error", error: { code: "invalid-request", message: "subscribe takes topics, a list of strings" } },
   })),
   ...POISONED.map((type) => ({
     sent: { type },
     answer: { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } },
   })),
-  { sent: { type: "subscribe", id: "after", name: "feed" }, answer: { type: "subscribed", id: "after" } },
+  {
+    sent: { type: "subscribe", topics: ["m.feed", "m.nothing"] },
+    answer: { type: "error", error: { code: "not-found", message: "no topic is named m.nothing" } },
+  },
+  { sent: SUBSCRIBE, answer: { type: "subscribed", topics: ["m.feed"], height: "0" } },
 ];
 
 describe("a subscription client's malformed message is answered invalid-request, never thrown", () => {
@@ -323,7 +340,7 @@ describe("a subscription client's malformed message is answered invalid-request,
     const [mine, peer] = channelPair();
     const answers: unknown[] = [];
     peer.onMessage((text) => answers.push(JSON.parse(text)));
-    connectChannel(mine, api(new Set()), { rules: connectionRules({}) });
+    connectChannel(mine, api(), { rules: connectionRules({}) });
     for (const { sent } of MALFORMED_CLIENT) peer.send(JSON.stringify(sent));
     await until(() => answers.length >= MALFORMED_CLIENT.length, "every answer", 5_000);
     expect(answers).toEqual(MALFORMED_CLIENT.map(({ answer }) => answer));
@@ -331,7 +348,7 @@ describe("a subscription client's malformed message is answered invalid-request,
   });
 
   it("through the handlers mounted in a host's server (api.upgrade): each answered, the connection goes on", async () => {
-    const handlers = moduleApiHandlers(api(new Set()));
+    const handlers = moduleApiHandlers(api());
     const server = createServer((_request, response) => response.end());
     server.on("upgrade", handlers.upgrade);
     server.listen(0, "127.0.0.1");
@@ -348,7 +365,7 @@ describe("a subscription client's malformed message is answered invalid-request,
   });
 
   it("on the listener (listen.api): each answered, the connection goes on", async () => {
-    const listener = await listenModuleApi(api(new Set()), "127.0.0.1:0");
+    const listener = await listenModuleApi(api(), "127.0.0.1:0");
     const client = await Client.connect(`ws://127.0.0.1:${listener.port}/`);
     try {
       for (const { sent } of MALFORMED_CLIENT) client.send(sent);
@@ -364,12 +381,12 @@ describe("a subscription client's malformed message is answered invalid-request,
     const value = fc.oneof(fc.jsonValue(), poisoned, fc.array(poisoned, { maxLength: 2 }), fc.dictionary(fc.string(), poisoned, { maxKeys: 2 }));
     const message = fc.oneof(
       fc.record({ type: value }),
-      fc.record({ type: fc.constantFrom("subscribe", "unsubscribe"), id: value, name: value, args: value }),
-      fc.record({ type: fc.constantFrom("subscribe", "unsubscribe"), id: value }),
+      fc.record({ type: fc.constantFrom("subscribe", "unsubscribe"), topics: value }),
+      fc.record({ type: fc.constantFrom("subscribe", "unsubscribe"), topics: fc.array(fc.oneof(fc.constant("m.feed"), fc.string(), poisoned), { maxLength: 3 }) }),
       value,
     );
-    const emits = new Set<(value: unknown) => void>();
-    const module = api(emits);
+    const topics = feed();
+    const module = api(topics.bus);
     fc.assert(
       fc.property(message, (sent) => {
         const out: string[] = [];
@@ -377,11 +394,11 @@ describe("a subscription client's malformed message is answered invalid-request,
         const connection = new SubscriptionConnection(carrier, module, connectionRules({}));
         expect(() => connection.received(JSON.stringify(sent))).not.toThrow();
         expect(out).toHaveLength(1);
-        expect(["error", "subscribed", "complete"]).toContain((JSON.parse(out[0] as string) as { type: string }).type);
+        expect(["error", "subscribed", "unsubscribed"]).toContain((JSON.parse(out[0] as string) as { type: string }).type);
         connection.ended();
       }),
       { seed: 2848, numRuns: 500 },
     );
-    expect(emits.size).toBe(0);
+    expect(topics.bus.subscriberCount).toBe(0);
   });
 });

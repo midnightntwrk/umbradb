@@ -38,8 +38,8 @@ export function contentDefinedLedgerState(options: ContentDefinedBuildOptions = 
   if (options.writesCounts !== true || write === undefined) return { ...base, provides };
   const points: Partial<PointCallbacks> = {
     ...base.points,
-    async "on-db-write"(p, b, w) {
-      await write.call(base.points, p, b, w);
+    async "on-db-write"(p, b, w, t) {
+      await write.call(base.points, p, b, w, t);
       await writeCountsAndQueue(w);
     },
   };

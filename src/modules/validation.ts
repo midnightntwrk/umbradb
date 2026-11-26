@@ -33,6 +33,7 @@
  * (`core-chain` and the admin endpoints' parts require no item).
  */
 
+import { z } from "zod";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkNames } from "../db/roles.js";
 import { type ErrorCode, UmbraError } from "../db/errors.js";
@@ -92,6 +93,7 @@ const DECLARATION_PROPERTIES = [
   "migrations",
   "requiresResync",
   "ledgerTasks",
+  "topics",
   "points",
 ];
 const ITEM_PROPERTIES = ["name", "lifetimes", "table"];
@@ -99,6 +101,9 @@ const TABLE_PROPERTIES = ["schema", "tables", "kind", "deterministic", "contentD
 const CONTENT_PROPERTIES = ["tables", "content"];
 const MIGRATION_PROPERTIES = ["id", "sql"];
 const TASK_PROPERTIES = ["name", "needsState", "run"];
+const TOPIC_PROPERTIES = ["name", "schema"];
+/** A topic's name: lowerCamelCase, as a route's. */
+const TOPIC_NAME = /^[a-z][A-Za-z0-9]{0,63}$/;
 
 /**
  * The semver 2.0.0 grammar, as suggested on semver.org. Configuration versions are checked with it too
@@ -382,6 +387,40 @@ function checkLedgerTasks(shape: Shape, value: Plain): void {
   }
 }
 
+/** Checks a declaration's `topics`: a list of `{ name, schema }`, names lowerCamelCase and unique, schemas JSON on the wire. */
+function checkTopics(shape: Shape, value: Plain): void {
+  const topics = value.topics;
+  if (topics === undefined) return;
+  if (!Array.isArray(topics)) shape.wrong("topics", topics, "a list of topics, defineTopic(name, schema)");
+  const named = new Map<string, number>();
+  topics.forEach((topic, position) => {
+    const at = `topics[${position}]`;
+    if (!isObject(topic)) shape.wrong(at, topic, "a topic, defineTopic(name, schema)");
+    shape.onlyKnown(topic, at, TOPIC_PROPERTIES);
+    const name = shape.string(topic, "name", `${at}.name`);
+    if (!TOPIC_NAME.test(name)) shape.wrong(`${at}.name`, name, "a lowerCamelCase name: a letter, then up to 63 letters and digits");
+    const before = named.get(name);
+    if (before !== undefined) {
+      shape.refuse(`${at}.name`, "a topic name used once", `${shape.who} declares the topic ${name} twice (topics[${before}] and ${at})`);
+    }
+    named.set(name, position);
+    const schema = topic.schema;
+    if (!isObject(schema) || typeof schema.safeParse !== "function" || !("_zod" in schema)) {
+      shape.wrong(`${at}.schema`, schema, "a zod schema");
+    }
+    try {
+      z.toJSONSchema(schema as unknown as z.ZodType, { io: "input" });
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      shape.refuse(
+        `${at}.schema`,
+        "a schema JSON can carry",
+        `${shape.who}'s topic ${name} has a schema JSON cannot carry (${why}): for an integer beyond 2^53, use bigintText()`,
+      );
+    }
+  });
+}
+
 /** Checks everything `ModuleDeclaration`'s type requires of `value`, except what the rules check. */
 function checkShape(value: unknown, origin: DeclarationOrigin, index: number): ModuleDeclaration {
   const shape: Shape = new Shape(origin, index, isObject(value) ? value.id : undefined);
@@ -463,6 +502,7 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
   });
   shape.boolean(value, "requiresResync", false);
   checkLedgerTasks(shape, value);
+  checkTopics(shape, value);
 
   const points = value.points;
   if (!isObject(points)) return shape.wrong("points", points, "an object of callbacks by point name");

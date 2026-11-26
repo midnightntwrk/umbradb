@@ -167,9 +167,9 @@ describe("the browser build in headless Chrome", () => {
       expect((await call<{ status: number }>(tab, "core", "api", { method: "GET", path: "/probe/2" }))?.status).toBe(404);
       // The subscriptions, on a channel of their own (api.connect).
       const subscriptions = await apiChannel(tab, "core", "a129");
-      await subscriptions.send({ type: "subscribe", id: "s1", name: "nothing" });
-      expect(await subscriptions.until(1, "the answer to an unknown subscription")).toEqual([
-        { type: "error", id: "s1", error: { code: "not-found", message: "no subscription is named nothing" } },
+      await subscriptions.send({ type: "subscribe", topics: ["probe.nothing"] });
+      expect(await subscriptions.until(1, "the answer to an unknown topic")).toEqual([
+        { type: "error", error: { code: "not-found", message: "no topic is named probe.nothing" } },
       ]);
 
       // The page reached nothing but its own files and the node.
@@ -260,8 +260,10 @@ describe("the browser build in headless Chrome", () => {
       await statusWhen(tab, "core", (s) => s.cursor === "5", "the core at 5, held before 6");
       await statusWhen(tab, "p1", (s) => s.cursor === "5", "p1 at 5");
       const subscriptions = await apiChannel(tab, "core", "l58");
-      await subscriptions.send({ type: "subscribe", id: "h", name: "probe-heights" });
-      expect(await subscriptions.until(1, "the subscription's acknowledgement")).toEqual([{ type: "subscribed", id: "h" }]);
+      await subscriptions.send({ type: "subscribe", topics: ["probe.heights"] });
+      expect(await subscriptions.until(1, "the subscription's acknowledgement")).toEqual([
+        { type: "subscribed", topics: ["probe.heights"], height: "5" },
+      ]);
       expect(await linksOf(tab)).toEqual([{ link: 1, instance: "p1", dropped: false }]);
 
       // The page drops the link, as a lost connection: p1 asks for a new channel, and the core takes it.
@@ -293,10 +295,15 @@ describe("the browser build in headless Chrome", () => {
       const shadow = await readOf(tab, "p1", "SELECT height, public_hash FROM shadow.rows ORDER BY height");
       expect(shadow.rows).toEqual(chain.blocks.slice(3, 10).map((block) => ({ height: `${block.height}`, public_hash: block.hex })));
       expect(await linksOf(tab)).toHaveLength(2);
-      // The subscription got each height the core committed after it opened, in order, with its hash.
-      const values = await subscriptions.until(5, "the values of 6 to 9");
+      // The subscription got a frame for each height the core committed after it opened, in order, with its hash.
+      const values = await subscriptions.until(5, "the frames of 6 to 9");
       expect(values.slice(1)).toEqual(
-        chain.blocks.slice(6, 10).map((block) => ({ type: "next", id: "h", value: { height: `${block.height}`, hash: block.hex } })),
+        chain.blocks.slice(6, 10).map((block) => ({
+          type: "height",
+          height: `${block.height}`,
+          hash: block.hex,
+          messages: [{ topic: "probe.heights", value: { height: `${block.height}` } }],
+        })),
       );
       // The same contents hash as Node.js on the same tape and configuration.
       const chosen = await eventWhen(tab, "core", "chosen");

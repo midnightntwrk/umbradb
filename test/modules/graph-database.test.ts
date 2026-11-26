@@ -10,6 +10,7 @@ import { type ResolvedGraph, resolveGraph, utf8Order } from "../../src/modules/g
 import { BACKENDS } from "../db/backends.js";
 import { declaration } from "./declarations.js";
 import { consumer, entry, graphInput } from "./graph-fixtures.js";
+import { NO_TOPICS } from "../helpers/topic-sink.js";
 
 /**
  * The resolved graph's outputs fed to the database API's real inputs, on both backends:
@@ -61,7 +62,7 @@ async function runHeights(db: Database, graph: ResolvedGraph, plan: SchemaPlan, 
       for (const part of range.writeOrder) {
         const write = part.points["on-db-write"];
         if (write === undefined) continue;
-        await writes.write(part.id, (w) => write.call(part.points, CONTEXT, blockAt(h), w));
+        await writes.write(part.id, (w) => write.call(part.points, CONTEXT, blockAt(h), w, NO_TOPICS));
       }
     });
   }

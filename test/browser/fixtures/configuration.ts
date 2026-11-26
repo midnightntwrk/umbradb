@@ -4,7 +4,9 @@ import { CORE_CHAIN_EVENTS } from "../../../src/backbone/core-chain-events/core-
 import { CORE_LEDGER_STATE } from "../../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { CORE_TX_RESULTS } from "../../../src/backbone/core-tx-results/core-tx-results.js";
 import { coreEntry, defineConfig } from "../../../src/config/entries.js";
+import { bigintText } from "../../../src/helpers/bigint-text.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
+import { defineTopic } from "../../../src/modules/topic.js";
 import {
   type BrowserConfiguration,
   type BrowserRun,
@@ -27,8 +29,8 @@ import {
  * `jsonb` document with integers beyond 2^53 (what the JSON reader must read without loss for equal contents hashes:
  * the equality check's negative control reads it with `JSON.parse`), and a `double precision` third of it in a table
  * declared `deterministic: false` (the contents hash names it only, so both runs must pass the schema plan's list), and
- * whose module API answers `GET /probe/:height` with that document and emits `{ height, hash }` to each subscriber of
- * `probe-heights` once the height committed (`on-after-db-write`). The module API always answers, through the core
+ * whose module API answers `GET /probe/:height` with that document, and which emits `{ height }` to its topic
+ * `probe.heights` from `on-db-write` (each frame carries the block's hash). The module API always answers, through the core
  * worker's handlers; with `lockstep=1` the core lists the private instance `p1` as lockstep. The configuration writes no
  * address: the private link runs over the page's channels, which the process workers ask for.
  *
@@ -58,8 +60,7 @@ export function probeDocument(height: bigint): string {
   return `{"height": ${height}, "big": ${9_007_199_254_740_993n + height * 1_000n}, "list": [${2n ** 62n + height}, -${2n ** 60n}]}`;
 }
 
-/** The emits of `probe-heights`' open subscriptions, in this process. */
-const SUBSCRIBERS = new Set<(value: unknown) => void>();
+const HEIGHTS = defineTopic("heights", z.object({ height: bigintText() }));
 
 /** The user module `probe` (see the module comment). */
 export const PROBE: ModuleDeclaration = {
@@ -85,6 +86,7 @@ export const PROBE: ModuleDeclaration = {
         "CREATE TABLE probe.notes (height bigint PRIMARY KEY, third double precision NOT NULL)",
     },
   ],
+  topics: [HEIGHTS],
   points: {
     async "on-start-api"(_p, api) {
       api.http("GET", "/probe/:height", async (request, read) => {
@@ -93,17 +95,11 @@ export const PROBE: ModuleDeclaration = {
           ? { status: 404, body: { error: `no probe row at ${request.params.height}` } }
           : { status: 200, body: { readHeight: `${read.height}`, doc: row.doc } };
       });
-      api.subscription("probe-heights", (_args, emit) => {
-        SUBSCRIBERS.add(emit);
-        return () => SUBSCRIBERS.delete(emit);
-      });
     },
-    async "on-after-db-write"(_p, b) {
-      for (const emit of [...SUBSCRIBERS]) emit({ height: b.height, hash: b.hash });
-    },
-    async "on-db-write"(_p, b, w) {
+    async "on-db-write"(_p, b, w, topics) {
       await w.execute("INSERT INTO probe.rows (height, hash, doc) VALUES ($1, $2, $3::jsonb)", [b.height, b.hash, probeDocument(b.height)]);
       await w.execute("INSERT INTO probe.notes (height, third) VALUES ($1, $2::double precision / 3)", [b.height, b.height]);
+      topics.emit(HEIGHTS, { height: b.height });
     },
   },
 };

@@ -136,7 +136,8 @@ describe("version 0.10.0, and one breaking line", () => {
     it("the real changelog fails with 17.4's notice put back: its statement and a per-export line", () => {
       const real = read("CHANGELOG.md");
       const lines = real.split("\n");
-      const at = lines.indexOf(NOTICE_HEADING);
+      // The release's own notice: an unreleased section may have breaking changes of its own above it.
+      const at = lines.indexOf(NOTICE_HEADING, lines.findIndex((line) => line.startsWith(`## [${RELEASE_VERSION}]`)));
       expect(at).toBeGreaterThan(0);
       const notice174 = [
         ...lines.slice(0, at + 2),

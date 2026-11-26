@@ -63,8 +63,8 @@ async function openTransactionProblems(backend: ProcessBackend, point: "on-db-wr
   const gate = loggingModule("gate", log, [], {
     ...base,
     points: {
-      async "on-db-write"(p, b, w) {
-        await base.points["on-db-write"]?.(p, b, w);
+      async "on-db-write"(p, b, w, t) {
+        await base.points["on-db-write"]?.(p, b, w, t);
         if (point === "on-db-write") await holding(b.height);
       },
       async "on-settle"(p, run, w) {

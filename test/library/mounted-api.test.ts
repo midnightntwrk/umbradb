@@ -38,10 +38,9 @@ import {
  *   read past it completes, as on the listener. Controls: the mounted path without the body limit, and over a
  *   module API whose read is not bounded, each fail the oracle.
  * - `[NEG]`: through mounted `api.upgrade`, as on the listener: a message that is not a JSON object with a
- *   type (text that is no JSON, a list, a string, a number, null, an object without a type), a `subscribe` without a
- *   valid id or name, an unknown type, an `unsubscribe` whose id is an object whose conversion to text throws are
- *   answered `invalid-request` (the connection goes on), an unknown subscription
- *   name `not-found`; a message over the module API's 64 KiB closes the connection (1009); a subscriber holding more
+ *   type (text that is no JSON, a list, a string, a number, null, an object without a type), a `subscribe` without
+ *   valid topics, an unknown type, an `unsubscribe` whose topics are an object whose conversion to text throws are
+ *   answered `invalid-request` (the connection goes on), an unknown topic `not-found`; a message over the module API's 64 KiB closes the connection (1009); a subscriber holding more
  *   than 1 MiB unsent is disconnected; the upgrade's 101 carries `X-Umbra-Version` and `X-Umbra-Config-Hash`, which
  *   holds no secret and does not change with one (a password in `database` on PostgreSQL; a TLS key and a node URL's
  *   credentials on PGlite; the run and oracle are `./config-hash-cases.ts`'s). Controls, each on the mounted path only:
@@ -133,8 +132,8 @@ interface SubscriptionSeen {
 
 /**
  * The protocol's malformed messages, in order: text that is no JSON, JSON that is no object (a list, a string, a
- * number, null), an object without a type, an unknown type, `subscribe`s without a valid id or name (an id that is
- * no string or is empty, a name missing or no string), an unknown subscription name.
+ * number, null), an object without a type, an unknown type, `subscribe`s without valid topics (no list, none, one of
+ * no strings), an unknown topic.
  */
 const PROTOCOL_MESSAGES: readonly unknown[] = [
   "{not json",
@@ -144,40 +143,48 @@ const PROTOCOL_MESSAGES: readonly unknown[] = [
   "null",
   {},
   { type: "dance" },
-  { type: "subscribe", id: 7, name: "feed" },
-  { type: "subscribe", id: "", name: "feed" },
-  { type: "subscribe", id: "y" },
-  { type: "subscribe", id: "y", name: 7 },
-  { type: "subscribe", id: "x", name: "nothing" },
+  { type: "subscribe", topics: 7 },
+  { type: "subscribe" },
+  { type: "subscribe", topics: [7] },
+  { type: "subscribe", topics: ["mapi.nothing"] },
 ];
 
 /** The answer to a message that is no JSON object with a type. */
 const NOT_AN_OBJECT = { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } };
 
-/** The answer to a `subscribe` without a valid id and name. */
-const NO_ID_AND_NAME = {
-  type: "error",
-  error: { code: "invalid-request", message: "a subscribe message has an id, a string of 1 to 128 characters, and a name, a string" },
-};
+/** The answer to a `subscribe` without valid topics. */
+const NO_TOPICS = { type: "error", error: { code: "invalid-request", message: "subscribe takes topics, a list of strings" } };
 
 /** The answers the protocol's checks give (as the listener gives them), one for each of {@link PROTOCOL_MESSAGES}, then the poisoned unsubscribe's. */
 const PROTOCOL_ERRORS = [
   ...Array.from({ length: 6 }, () => NOT_AN_OBJECT),
   { type: "error", error: { code: "invalid-request", message: "a message's type is subscribe or unsubscribe" } },
-  ...Array.from({ length: 4 }, () => NO_ID_AND_NAME),
-  { type: "error", id: "x", error: { code: "not-found", message: "no subscription is named nothing" } },
-  // An id whose conversion to text throws: answered, never thrown out of the socket's callback.
-  { type: "error", error: { code: "invalid-request", message: "an unsubscribe message's id is a string, not an object" } },
+  ...Array.from({ length: 3 }, () => NO_TOPICS),
+  { type: "error", error: { code: "not-found", message: "no topic is named mapi.nothing" } },
+  // Topics whose conversion to text throws: answered, never thrown out of the socket's callback.
+  { type: "error", error: { code: "invalid-request", message: "unsubscribe takes topics, a list of strings" } },
 ];
 
-/** An `unsubscribe` whose id is an object whose conversion to text throws. */
-const POISONED_UNSUBSCRIBE = '{"type":"unsubscribe","id":{"toString":null}}';
+/** An `unsubscribe` whose topics are an object whose conversion to text throws. */
+const POISONED_UNSUBSCRIBE = '{"type":"unsubscribe","topics":{"toString":null}}';
+
+const SUBSCRIBE_FEED = { type: "subscribe", topics: ["mapi.feed"] };
+
+/** Finalizes the height after `from` on `source`, then the next on each call, waiting for `handle` to commit it. */
+function heightsAfter(handle: UmbraDBHandle, source: InMemoryBlockSource, from: bigint): () => Promise<void> {
+  let height = from;
+  return async () => {
+    height += 1n;
+    source.finalize(height);
+    await cursorReaches(handle, height);
+  };
+}
 
 /**
- * The subscription checks at `ws` (see the module comment), `hooks` the module's emits. Each client is closed
- * before the next check, so the slow subscriber is `feed`'s only one.
+ * The subscription checks at `ws` (see the module comment): `next` commits one more height, whose `feed` message
+ * carries `hooks.pad`. Each client is closed before the next check, so the slow subscriber is `feed`'s only one.
  */
-async function subscriptionSeen(ws: string, hooks: MapiHooks): Promise<SubscriptionSeen> {
+async function subscriptionSeen(ws: string, hooks: MapiHooks, next: () => Promise<void>): Promise<SubscriptionSeen> {
   const protocol = await Client.connect(ws);
   for (const message of [...PROTOCOL_MESSAGES, POISONED_UNSUBSCRIBE]) protocol.send(message);
   // Every answer comes within 3 s, or the check counts what came.
@@ -186,29 +193,30 @@ async function subscriptionSeen(ws: string, hooks: MapiHooks): Promise<Subscript
   await protocol.close();
 
   const big = await Client.connect(ws);
-  big.send({ type: "subscribe", id: "1", name: "feed" });
+  big.send(SUBSCRIBE_FEED);
   await big.until(1);
-  big.send({ type: "subscribe", id: "2", name: "feed", args: "x".repeat(65_536) });
+  big.send({ type: "subscribe", topics: ["x".repeat(65_536)] });
   const oversizeClose = await Promise.race([big.closed, new Promise<"open">((resolve) => setTimeout(() => resolve("open"), 3_000))]);
   await big.close();
-  await eventually(() => hooks.emits.size === 0, "the oversized message's connection unsubscribed");
 
   const slow = await Client.connect(ws);
-  slow.send({ type: "subscribe", id: "1", name: "feed" });
+  slow.send(SUBSCRIBE_FEED);
   await slow.until(1);
-  // The client stops reading: what the server sends piles up in its buffer.
+  // The client stops reading: the frames the server sends pile up in its buffer.
   slow.raw.pause();
-  const value = "x".repeat(256 * 1024);
-  // 64 values of 256 KiB, 16 MiB: far more than the 1 MiB limit and what the system's socket buffers hold.
-  for (let index = 0; index < 64 && hooks.emits.size > 0; index++) {
-    for (const emit of [...hooks.emits]) emit(value);
-    await new Promise((resolve) => setImmediate(resolve));
+  const pad = hooks.pad as { value?: string };
+  pad.value = "x".repeat(512 * 1024);
+  // 32 frames of 512 KiB, 16 MiB: far more than the 1 MiB limit and what the system's socket buffers hold.
+  try {
+    for (let index = 0; index < 32; index++) await next();
+  } finally {
+    delete pad.value;
   }
-  const slowDisconnected = hooks.emits.size === 0;
   slow.raw.resume();
+  // Disconnected, the client sees its close once it reads again; kept, it drains and stays open.
+  const slowClose = await Promise.race([slow.closed, new Promise<"open">((resolve) => setTimeout(() => resolve("open"), 3_000))]);
   slow.socket.terminate();
-  await eventually(() => hooks.emits.size === 0, "the slow subscriber unsubscribed").catch(() => undefined);
-  return { errors, oversizeClose, slowDisconnected };
+  return { errors, oversizeClose, slowDisconnected: slowClose !== "open" };
 }
 
 /** The oracle over what the mounted path saw, against the expected answers (the listener's own). */
@@ -229,7 +237,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name", (b
 
   it("X-Umbra-Version on every answer; X-Umbra-Config-Hash absent before the hash exists, the listener's after", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set(), startDb: gate() };
+    const hooks: MapiHooks = { startDb: gate() };
     const m = mapiModule(hooks);
     // S = 1 above the head: once on-start-db ran (and the hash was read), startup waits for the node.
     const source = new InMemoryBlockSource({ head: 0n });
@@ -303,7 +311,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name", (b
 
   it("mounted api.http refuses a body over the limit with 413 and bounds reads as the listener does", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set() };
+    const hooks: MapiHooks = {};
     const m = mapiModule(hooks);
     const handle = startUmbraDB({
       config: { data: libraryData(db.setting, [m], { apiReadTimeoutMs: 1_000 }) },
@@ -325,7 +333,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name", (b
 
   it("negative controls: the mounted path without the body limit, and over a read that is not bounded, fail the oracle", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set() };
+    const hooks: MapiHooks = {};
     const m = mapiModule(hooks);
     const unbounded = (routes: ConstructorParameters<typeof RealModuleApi>[0], options: ConstructorParameters<typeof RealModuleApi>[1]): ModuleApi =>
       new RealModuleApi(routes, { ...options, timeoutMs: 600_000 });
@@ -358,12 +366,13 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name", (b
 
   it("mounted api.upgrade answers, limits and disconnects as the listener does; its 101 names the build and the configuration", async () => {
     const db = await backend.database();
-    const hooks: MapiHooks = { emits: new Set() };
+    const hooks: MapiHooks = { pad: {} };
     const m = mapiModule(hooks);
+    const source = new InMemoryBlockSource({ head: 2n });
     const handle = startUmbraDB({
       config: { data: libraryData(db.setting, [m]) },
       modules: [m],
-      source: new InMemoryBlockSource({ head: 2n }),
+      source,
       network: { api: { port: 0 } },
     });
     const host = await mountHandlers(handle);
@@ -371,8 +380,9 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name", (b
       await handle.started;
       await cursorReaches(handle, 2n);
       const listener = listenerOf(handle);
-      const onListener = await subscriptionSeen(listener.ws, hooks);
-      const mounted = await subscriptionSeen(host.ws, hooks);
+      const next = heightsAfter(handle, source, 2n);
+      const onListener = await subscriptionSeen(listener.ws, hooks, next);
+      const mounted = await subscriptionSeen(host.ws, hooks, next);
       // The listener's answers are the expected ones, and the mounted path's are the same.
       expect(subscriptionProblems("listener", onListener)).toEqual([]);
       expect(subscriptionProblems("mounted", mounted)).toEqual([]);
@@ -394,18 +404,20 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name", (b
     ];
     for (const control of controls) {
       const db = await backend.database();
-      const hooks: MapiHooks = { emits: new Set() };
+      const hooks: MapiHooks = { pad: {} };
       const m = mapiModule(hooks);
+      const source = new InMemoryBlockSource({ head: 2n });
       const handle = startWithSeams(
-        { config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 2n }), network: { api: { port: 0 } } },
+        { config: { data: libraryData(db.setting, [m]) }, modules: [m], source, network: { api: { port: 0 } } },
         { mountedApi: control.seams },
       );
       const host = await mountHandlers(handle);
       try {
         await handle.started;
         await cursorReaches(handle, 2n);
-        expect(subscriptionProblems("mounted", await subscriptionSeen(host.ws, hooks)), control.what).toContain(control.fails);
-        expect(subscriptionProblems("listener", await subscriptionSeen(listenerOf(handle).ws, hooks)), control.what).toEqual([]);
+        const next = heightsAfter(handle, source, 2n);
+        expect(subscriptionProblems("mounted", await subscriptionSeen(host.ws, hooks, next)), control.what).toContain(control.fails);
+        expect(subscriptionProblems("listener", await subscriptionSeen(listenerOf(handle).ws, hooks, next)), control.what).toEqual([]);
       } finally {
         await handle.stop();
         await host.close();
@@ -413,7 +425,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name", (b
     }
     // The core's headers left out of the mounted path: its 101 names neither the build nor the configuration.
     const db = await backend.database();
-    const m = mapiModule({ emits: new Set() });
+    const m = mapiModule({});
     const handle = startWithSeams(
       { config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 1n }), network: { api: { port: 0 } } },
       { mountedApi: { coreHeaders: "none" } },

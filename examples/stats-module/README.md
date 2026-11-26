@@ -1,16 +1,15 @@
 # stats-module
 
 A small public module. For each height it stores one row: the block's hash, how many Midnight transactions the block
-carried, how many of them failed, and a running total. It serves the rows over HTTP and a subscription. The
+carried, how many of them failed, and a running total. It serves the rows over HTTP and publishes each new row to a topic. The
 [module guide](../../docs/module-guide.md) §2 walks through the code.
 
 ## Files
 
 - `stats-module.ts`: the module. It holds the `defineModule` declaration (id, requires, provides, settings) and the
   module's points:
-  - `on-db-write` counts each block's transactions and stores the row;
-  - `on-start-api` registers the routes and the subscription;
-  - `on-after-db-write` sends new rows to subscribers.
+  - `on-db-write` counts each block's transactions, stores the row and emits it to the topic `blocks`;
+  - `on-start-api` registers the routes.
 - `sql.ts`: all of the module's SQL. It holds the migrations that create `stats_module.blocks`, the `StatsRow` type,
   and the functions that read and write rows (`lastTotal`, `insertRow`, `rowAt`, `recentRows`).
 - `umbradb.config.ts`: the configuration that `umbradb run` reads. It holds:
@@ -19,8 +18,8 @@ carried, how many of them failed, and a running total. It serves the rows over H
   - the module's own entry, with its settings.
 - `run.sh`: starts the process (`./run.sh`), or checks the configuration without starting anything
   (`./run.sh check`). It uses the repository's built command in `dist/`.
-- `try.sh`: calls a running process. It requests the admin status, every route and a bad request, then opens the
-  subscription.
+- `try.sh`: calls a running process. It requests the admin status, every route and a bad request, then subscribes to
+  the topic.
 - `tsconfig.json`: maps the `"umbradb"` import to the repository's `src/`, so `npm run typecheck` checks the example
   against the current source.
 - `.gitignore`: keeps `data/` out of git. `data/` holds the PGlite database, created on the first run.
@@ -54,7 +53,8 @@ The routes are:
 - `GET /stats-module/blocks/:height`;
 - `GET /stats-module/recent?limit=N`: the newest N blocks that have transactions (`tx_count > 0`); empty blocks are
   skipped, so its first height can be below `/latest`'s;
-- the subscription `stats-module-blocks`, which takes `args: { "minTx": n }`.
+- the topic `stats-module.blocks` over a WebSocket at the same address: send `{"type":"subscribe","topics":["stats-module.blocks"]}`,
+  then get one frame per committed height.
 
 Three environment variables change where it connects and listens. They apply to both scripts:
 

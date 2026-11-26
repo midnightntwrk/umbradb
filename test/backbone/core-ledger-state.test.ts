@@ -24,6 +24,7 @@ import { type Statement, statementText } from "../../src/db/repeated-statements.
 import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
+import { NO_TOPICS } from "../helpers/topic-sink.js";
 
 // `core-ledger-state`'s parts on their own, over a fake ledger worker and block source: the binding, the checks before
 // a block's apply, the root check's error, the writes of a block's own rows, and the reclamation at `on-settle`. The
@@ -323,13 +324,13 @@ describe("core-ledger-state's parts", () => {
     const put = new Map<string, unknown>();
     const points = CORE_LEDGER_STATE.points;
     const w = { execute: async () => 1 } as never;
-    await expect(points["on-db-write"]?.(p, block(1n), w)).rejects.toThrow(/applied no such block/);
+    await expect(points["on-db-write"]?.(p, block(1n), w, NO_TOPICS)).rejects.toThrow(/applied no such block/);
     await points["on-compute"]?.(p, block(1n), reading([{ ms: 1n }]) as never, { put: (k, v) => put.set(k, v) });
     expect([...put.keys()]).toEqual(["ledger-state", "ledger-events", "segment-results", "vm-logs"]);
-    await expect(points["on-db-write"]?.(p, block(2n), w)).rejects.toThrow(/applied no such block/);
+    await expect(points["on-db-write"]?.(p, block(2n), w, NO_TOPICS)).rejects.toThrow(/applied no such block/);
     await points["on-compute"]?.(p, block(1n), reading([{ ms: 1n }]) as never, { put: () => undefined });
-    await points["on-db-write"]?.(p, block(1n), w);
-    await expect(points["on-db-write"]?.(p, block(1n), w)).rejects.toThrow(/applied no such block/);
+    await points["on-db-write"]?.(p, block(1n), w, NO_TOPICS);
+    await expect(points["on-db-write"]?.(p, block(1n), w, NO_TOPICS)).rejects.toThrow(/applied no such block/);
     // Nothing after the commit: the engine tells the worker's host, which commits the block in the worker.
     expect(Object.keys(points)).not.toContain("on-after-db-write");
     expect(asked.some((request) => typeof request === "object" && request !== null && "commit" in request)).toBe(false);

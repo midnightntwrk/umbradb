@@ -14,7 +14,7 @@ each finalized block, writes rows, and serves them over its own API. This guide 
   is enforced, so the rules in this guide are yours to keep ([threat model](THREAT_MODEL.md)).
 - **What UmbraDB does for it.** It reads finalized blocks from a Midnight node and decodes them; calls each module's
   callbacks in requirement order; runs every module's writes for a height in one transaction with the height reached
-  (the cursor), so a height is stored whole or not at all; serves each module's HTTP routes and subscriptions; checks
+  (the cursor), so a height is stored whole or not at all; serves each module's HTTP routes, and its topics to subscribers; checks
   that the same chain gives the same rows on every machine (§4); and stops at the first failing callback, saying why
   on its admin endpoints (§12).
 - **A block's path through a module.**
@@ -22,10 +22,10 @@ each finalized block, writes rows, and serves them over its own API. This guide 
   ```text
   startup     migrations ─▶ on-start-db ─▶ on-start-api
   per height  on-fetch ─▶ on-parse ─▶ on-compute ─▶ on-db-write ─▶ on-settle ══ COMMIT ══▶ on-after-db-write
-                                      (reads h − 1)  (block transaction)                   (reads h; notifies)
+                                      (reads h − 1)  (block transaction; emits)            (reads h)
   ```
 
-  Most modules need only `on-db-write`, `on-start-api` and, for subscriptions, `on-after-db-write` (all thirteen: §3).
+  Most modules need only `on-db-write` and `on-start-api` (all thirteen: §3).
 - **Items.** Modules exchange data as named items, each with one or more lifetimes: `block`, one block's data, read
   from `block.items` (`block-parsed`); `table`, tables its provider writes and others read with SQL (`blocks` is
   `core_block_commit.blocks`); `process`, a value set once per process (`db`, a read-only database). A module lists
@@ -35,7 +35,7 @@ each finalized block, writes rows, and serves them over its own API. This guide 
 ## 2. A first module: `stats-module`
 
 `stats-module` stores one row per height — the block's hash, how many Midnight transactions it carried, how many
-failed, and a running total — and serves the rows over HTTP and a subscription. The complete module is in
+failed, and a running total — and serves the rows over HTTP, and publishes each new row to a topic. The complete module is in
 [`examples/stats-module/`](../examples/stats-module/): `stats-module.ts`, its SQL in `sql.ts`, its configuration
 `umbradb.config.ts`, and the scripts `run.sh` and `try.sh`. The blocks below are excerpts of those files.
 
@@ -43,7 +43,7 @@ failed, and a running total — and serves the rows over HTTP and a subscription
 
 ```ts
 import { z } from "zod";
-import { defineModule, defineRoute, hexBytes, type ParsedTransaction, RouteError, uintText } from "umbradb";
+import { defineModule, defineRoute, defineTopic, hexBytes, type ParsedTransaction, RouteError, uintText } from "umbradb";
 import { insertRow, lastTotal, migrations, recentRows, rowAt } from "./sql.ts";
 
 type Outcome = "success" | "partial" | "failure";
@@ -77,9 +77,10 @@ export const statsModule = defineModule({
   }),
   // SQL migrations: they create the module's table in its own schema, once each and in order (./sql.ts).
   migrations,
+  // The topics it publishes to from on-db-write; subscribers name them `stats-module.<name>`.
+  topics: [blocksTopic],
   // The points: where the module's code runs. The runner calls each callback at its point, at startup or for every
-  // block: on-db-write inside the block's transaction, on-start-api to register routes, on-after-db-write after the
-  // commit.
+  // block: on-db-write inside the block's transaction, on-start-api to register routes.
   points: {/* §2.3, §2.4 */},
 });
 ```
@@ -118,7 +119,7 @@ has a primary key and uses the types of §4.
 ### 2.3 Writing each block
 
 ```ts
-    async "on-db-write"(_processContext, block, writer) {
+    async "on-db-write"(_processContext, block, writer, topics) {
       const { transactions } = block.items.get("block-parsed") as { transactions: readonly ParsedTransaction[] };
       const outcomes = block.items.get("tx-results") as readonly Outcome[]; // one per transaction, same order
       const counted = outcomes.filter(
@@ -132,6 +133,14 @@ has a primary key and uses the types of §4.
         txCount: counted.length,
         failedCount: failed,
         totalTx,
+      });
+      // Held until the height commits, and dropped if it does not.
+      topics.emit(blocksTopic, {
+        height: block.height,
+        hash: `0x${Buffer.from(block.hash).toString("hex")}`,
+        tx_count: counted.length,
+        failed_count: failed,
+        total_tx: totalTx,
       });
     },
 ```
@@ -154,7 +163,7 @@ export async function insertRow(writer: BlockWriteHandle, row: StatsRow): Promis
 ```
 
 `on-db-write` runs inside the height's transaction, through its write handle `writer`: if any module fails at this
-height, nothing of the height is stored. Every value comes from the block, its items, the settings and the module's own
+height, nothing of the height is stored, and nothing it emitted to `topics` is sent (§7). Every value comes from the block, its items, the settings and the module's own
 table, never from the clock, so every machine writes the same row (§4). A `bigint` column reads back as a `bigint`.
 
 ### 2.4 Serving it
@@ -172,11 +181,9 @@ export async function rowAt(read: ReadHandle, height: bigint): Promise<Record<st
 }
 ```
 
-Beside the declaration, the shape of a row as the API gives it, and one route:
+Beside the declaration, the shape of a row as the API gives it, the topic, and one route:
 
 ```ts
-const subscribers = new Set<{ minTx: number; emit: (value: unknown) => void }>();
-
 // A stored row as the API gives it. uintText(64) is a bigint here and digits in a string to a client, which no JSON
 // reader rounds; hexBytes() is "0x" and lowercase hex.
 const Block = z.strictObject({
@@ -197,6 +204,10 @@ const blockOf = (row: Record<string, unknown>): z.output<typeof Block> => ({
   failed_count: row.failed_count as number,
   total_tx: row.total_tx as bigint,
 });
+
+// The topic: each new row, sent to subscribers once its height commits. block_time is left out: it lives in the core's
+// blocks table, and on-db-write emits what it already has rather than reading the row back.
+const blocksTopic = defineTopic("blocks", Block.omit({ block_time: true }));
 
 const noRow = () => new RouteError("not-found", "no-row", "no row at that height");
 
@@ -223,19 +234,6 @@ In `points`:
       api.route(getLatest);
       api.route(getBlock);
       api.route(listRecent(recentLimit));
-
-      api.subscription("stats-module-blocks", (args, emit) => {
-        const subscriber = { minTx: Number((args as { minTx?: number } | null)?.minTx ?? 0), emit };
-        subscribers.add(subscriber);
-        return () => subscribers.delete(subscriber);
-      });
-    },
-
-    async "on-after-db-write"(_processContext, block, read) {
-      const row = subscribers.size > 0 ? await rowAt(read, block.height) : undefined;
-      for (const subscriber of subscribers) {
-        if (row !== undefined && Number(row.tx_count) >= subscriber.minTx) subscriber.emit(z.encode(Block, blockOf(row)));
-      }
     },
 ```
 
@@ -243,9 +241,9 @@ A route is an operation: a name, a schema of its input and of its output, and a 
 `http` only says where HTTP serves it, under `/stats-module`, so `getBlock` is `GET /stats-module/blocks/:height`
 (§7). UmbraDB checks the input before the handler runs and the output before it is sent, reads each answer at one
 committed height, adds the headers `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (what the read saw), and answers
-503 before the first height commits. Routes are registered in `on-start-api`, and only there. `on-after-db-write` runs
-after the commit: it notifies and writes nothing, and `z.encode(Block, …)` gives a subscriber the row as a route sends
-it. The example file has two more routes: `getLatest` (`/stats-module/latest`), and `listRecent`
+503 before the first height commits. Routes are registered in `on-start-api`, and only there. A topic is declared in
+`topics` and emitted to from `on-db-write` (§2.3); its schema writes each message as a route's output schema writes an
+answer (§7). The example file has two more routes: `getLatest` (`/stats-module/latest`), and `listRecent`
 (`/stats-module/recent`, which uses `recentLimit` and lists only blocks with transactions).
 
 ### 2.5 The configuration file
@@ -301,13 +299,14 @@ curl http://127.0.0.1:18081/status                   # state, cursor, node head,
 ```
 
 In a project that installed the package (the README's quick start), the same commands are `npx umbradb config check
-umbradb.config.ts` and `npx umbradb run`. For the subscription, a WebSocket client connects to `ws://127.0.0.1:18080`
-and exchanges JSON messages (`./try.sh subscribe` does):
+umbradb.config.ts` and `npx umbradb run`. For the topic, a WebSocket client connects to `ws://127.0.0.1:18080` and
+exchanges JSON messages (`./try.sh subscribe` does). The acknowledgement gives the committed height; the next frame is
+the one after it, and every height after that gets a frame, empty or not:
 
 ```text
-→ {"type":"subscribe","id":"s1","name":"stats-module-blocks","args":{"minTx":1}}
-← {"type":"subscribed","id":"s1"}
-← {"type":"next","id":"s1","value":{"height":"…","hash":"0x…","block_time":"…","tx_count":2,…}}
+→ {"type":"subscribe","topics":["stats-module.blocks"]}
+← {"type":"subscribed","topics":["stats-module.blocks"],"height":"1233"}
+← {"type":"height","height":"1234","hash":"0x…","messages":[{"topic":"stats-module.blocks","value":{"height":"1234","tx_count":2,…}}]}
 ```
 
 Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made tables §10, private data §14, changes §15–16.
@@ -325,7 +324,7 @@ Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made ta
 | `on-finalized` | a new finalized head, before its heights | read at the cursor | in series |
 | `on-start-height` | your entry's start height | read at h − 1 | in series |
 | `on-compute` | before the block transaction opens | read at h − 1, item sink | in waves |
-| `on-db-write` | inside the block transaction | block write handle | in series |
+| `on-db-write` | inside the block transaction | block write handle, topic sink | in series |
 | `on-settle` | inside the block transaction, after every `on-db-write` | block write handle | in series |
 | `on-after-db-write` | after the commit; no `block` items | read at h | in series |
 | `on-stop-height` | after your entry's stop height committed | read at h | in series |
@@ -334,8 +333,8 @@ Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made ta
   `height`, `hash`, `parentHash`, `items`, `settings` (your revision's at this height), `active(moduleId)` and
   `continues` (below). `on-settle` gets `run` instead (below).
 - **Which point for which job.** Compute in `on-compute`: it reads the state before the block, and modules there run in
-  parallel. Write a block's rows in `on-db-write`, inside the block's transaction. Notify in `on-after-db-write`, once
-  the height is committed. Set up in `on-start-db`; register routes in `on-start-api`.
+  parallel. Write a block's rows in `on-db-write`, inside the block's transaction, and emit
+  to your topics there: they are sent once the height commits (§7). Set up in `on-start-db`; register routes in `on-start-api`.
 - **The block before, from memory: `block.continues`.** True exactly when the block before was committed by this
   process in the same run of processing (its `COMMIT` answered, no failure, retry or restart since) and the writer
   still has the database session that committed it when your callback's context is made (at `on-compute` and
@@ -658,10 +657,16 @@ counts and queue (after a restart, for one).
 - **Stating the height you read.** `answerChainData(read, answer)` as in §2.4. For other shapes:
   `readChainDataView(read)` gives `{ view, height, hash }`, `chainDataHeaders(view)` the three headers, and
   `withViewExtensions(body, view)` puts them in a GraphQL response's `extensions`, its `data` unchanged.
-- **Subscriptions.** `api.subscription(name, handler)`: the handler gets the subscriber's `args` and an `emit`, and
-  returns its unsubscribe. Call the `emit`s from `on-after-db-write`, putting in each value the height a subscriber
-  needs. `emit` never waits: a subscriber more than 1 MiB behind is disconnected. After a restart a subscriber may see
-  a height twice (§12).
+- **Topics**, for live updates. Declare each with `defineTopic(name, schema)` in the module's `topics` (a name in
+  lowerCamelCase; a schema under a route output's rules), and emit to it from `on-db-write` with
+  `topics.emit(topic, value)`. The value is checked and written by the schema at the call, so a value it refuses fails
+  the height whether or not anyone subscribes. What a height emits is sent once it commits, and dropped if it does not.
+  Subscribers name a topic `<module-id>.<name>`, and get one frame per committed height, in order: every module's
+  messages for the height, empty when there are none. A subscription with no topics follows the heights alone; an
+  unsubscribe that leaves a connection no topic stops its frames. Nothing is kept for a subscriber that missed heights (one
+  disconnected for being more than 1 MiB behind, or a client that reconnects): it reads your routes up to the height the
+  acknowledgement gave, then follows the frames. A private module's topics are served by its private process's own
+  module API.
 
 ## 8. Settings
 
@@ -790,7 +795,7 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 | `on-fetch`, `on-parse` | fetched ahead, for best blocks, after a lost connection | keep no state past the block |
 | `on-start-height` | after a restart, if the start height had not committed | make it idempotent |
 | `on-compute`, `on-db-write`, `on-settle` | after a lost connection; only a committed run's writes stay | no outside effects |
-| `on-after-db-write`, `on-stop-height` | after a restart, for the last committed height | a notification may repeat |
+| `on-after-db-write`, `on-stop-height` | after a restart, for the last committed height | make it idempotent |
 
 ## 13. Providing items to other modules
 
@@ -1229,5 +1234,8 @@ export default defineConfig({
 - **A.5 Module API wire format.** UmbraDB's own errors are `{ "error": { "code", "message" } }`: 400
   `invalid-request`, 404 `not-found`, 405 `method-not-allowed`, 413 `request-too-large` (a body over 1 MiB), 500
   `internal-error`, 503 `no-committed-height`, 504 `query-timeout`. WebSocket, on the API address, any path:
-  `subscribe` (`id`, `name`, `args`) is answered `subscribed`, then `next` with each `value`; `unsubscribe` (`id`) is
-  answered `complete`; what cannot be done, `error`. A message has at most 64 KiB.
+  `subscribe` (`topics`, all known or none taken; `[]` for the heights alone) is answered `subscribed` (`topics` held,
+  `height` the committed one); then `height` (`height`, `hash`, `messages`: `{ topic, value }`) for every committed
+  height; `unsubscribe` (`topics`) is answered `unsubscribed`, and stops the frames once no topic is left (`[]` stops a
+  heights-only subscription); what cannot be done, `error`. A message has at
+  most 64 KiB.

@@ -1,5 +1,5 @@
 /**
- * The module API: what modules register in `on-start-api`, and how a request and a subscription are answered. It has
+ * The module API: what modules register in `on-start-api`, and how a request is answered. It has
  * no transport of its own, so the browser build can carry the same requests over `postMessage`; Node.js's HTTP and
  * WebSocket listener on `listen.api` is `./api-server.ts`.
  *
@@ -16,8 +16,7 @@
  * callbacks run in the startup order, in series, each with its module's process context and a registry of its own,
  * closed when the callback ends ({@link ApiRoutes.open}). A malformed registration throws at the call, as does a route
  * name the module already registered. Once every
- * `on-start-api` has run, two registrations of one method and path (parameters' names aside), or of one subscription
- * name, refuse startup with `duplicate-api-route`, naming the route and both modules, before anything listens.
+ * `on-start-api` has run, two registrations of one method and path (parameters' names aside) refuse startup with `duplicate-api-route`, naming the route and both modules, before anything listens.
  *
  * **Paths.** `/` or `/` and segments, each a literal of `A–Z a–z 0–9 - . _ ~ ! $ & ' ( ) * + , ; = @` or a parameter
  * `:name`. A request's segments are percent-decoded before they are compared, and a literal segment wins over a
@@ -56,10 +55,8 @@
  *   fixed message, so no exception text, which may hold a credential, reaches a client. The error itself goes to
  *   `onError`.
  *
- * **Subscriptions** ({@link ModuleApi.subscribe}). The module's handler gets the subscriber's arguments and an `emit`,
- * and returns its unsubscribe. The module notifies its subscribers from its own `on-after-db-write`; nothing here checks
- * where `emit` is called from, since modules are trusted. `emit` never waits: it hands the value to the transport,
- * which writes it or drops a subscriber that fell behind. After the unsubscribe it does nothing.
+ * **Topics** are not registered here: modules declare them, and {@link ModuleApi.topics} is the process's bus
+ * (`./topic-bus.ts`), which the subscription protocol (`./api-session.ts`) serves.
  */
 
 import type { ReadHandle, ReadOptions } from "../db/api.js";
@@ -72,6 +69,7 @@ import { encodeJson, readExactNumber, UnreadableNumber } from "./api-json.js";
 import { runSchedule, seriesOf } from "./dispatch.js";
 import type { ChainDataAnswer } from "./envelope.js";
 import type { ProcessContexts } from "./process-context.js";
+import { TopicBus } from "./topic-bus.js";
 import { bindBinaryRoute } from "./route-binary.js";
 import { type BoundRoute, bindRoute, type RouteEntry } from "./route-http.js";
 
@@ -83,9 +81,6 @@ export type HttpMethod = "GET" | "POST";
 
 /** A module's HTTP handler. */
 export type HttpHandler = Parameters<ApiRegistry["http"]>[2];
-
-/** A module's subscription handler: returns its unsubscribe. */
-export type SubscriptionHandler = Parameters<ApiRegistry["subscription"]>[1];
 
 /** One segment of a route's path: a literal, or a parameter's name. */
 export type PathSegment = { readonly literal: string } | { readonly param: string };
@@ -100,13 +95,6 @@ export interface HttpRoute {
   readonly handler: HttpHandler;
   /** A route's (`registry.route`): the numbers of its JSON body are read exactly (`readExactNumber`, `./api-json.ts`). */
   readonly exact: boolean;
-}
-
-/** A subscription a module registered. */
-export interface SubscriptionRoute {
-  readonly module: string;
-  readonly name: string;
-  readonly handler: SubscriptionHandler;
 }
 
 /** One module's registration in its `on-start-api`. */
@@ -172,6 +160,8 @@ export interface ModuleApiOptions {
   readonly timeoutMs: number;
   /** Told of every failure answered 500, with the route: the runner logs it (redacted). */
   readonly onError?: (error: unknown, where: { readonly module: string; readonly route: string }) => void;
+  /** The process's topic bus; one with no topics unless given. */
+  readonly topics?: TopicBus;
 }
 
 /** The content type of every JSON body the module API writes. */
@@ -218,9 +208,7 @@ function parsePath(module: string, method: HttpMethod, path: unknown): PathSegme
 }
 
 /** One registration, in order. */
-type Registration =
-  | { readonly kind: "http"; readonly route: HttpRoute }
-  | { readonly kind: "subscription"; readonly route: SubscriptionRoute };
+type Registration = { readonly kind: "http"; readonly route: HttpRoute };
 
 /** A route's shape: its method and segments, parameters' names left out. */
 const shapeOf = (route: HttpRoute): string =>
@@ -238,12 +226,7 @@ export class ApiRoutes {
 
   /** The HTTP routes registered, in registration order. */
   get http(): readonly HttpRoute[] {
-    return Object.freeze(this.#registrations.flatMap((r) => (r.kind === "http" ? [r.route] : [])));
-  }
-
-  /** The subscriptions registered, in registration order. */
-  get subscriptions(): readonly SubscriptionRoute[] {
-    return Object.freeze(this.#registrations.flatMap((r) => (r.kind === "subscription" ? [r.route] : [])));
+    return Object.freeze(this.#registrations.map((r) => r.route));
   }
 
   /** A registry for `module`'s `on-start-api`, valid until {@link ModuleRegistration.close}. */
@@ -282,16 +265,6 @@ export class ApiRoutes {
         if (!open) throw after(`${String(method)} ${String(path)}`);
         http(method, path, handler);
       },
-      subscription: (name: string, handler: SubscriptionHandler): void => {
-        if (!open) throw after(`the subscription ${String(name)}`);
-        if (typeof name !== "string" || name === "") {
-          throw new TypeError(`${module} registered a subscription whose name is not a non-empty string`);
-        }
-        if (typeof handler !== "function") {
-          throw new TypeError(`${module} registered the subscription ${name} with a handler that is not a function`);
-        }
-        this.#registrations.push({ kind: "subscription", route: Object.freeze({ module, name, handler }) });
-      },
     });
     return Object.freeze({
       registry,
@@ -302,25 +275,22 @@ export class ApiRoutes {
   }
 
   /**
-   * Refuses the first registration, in registration order, whose method and path (parameters' names aside) or
-   * subscription name an earlier one has: `duplicate-api-route`, naming the route as first registered and both modules.
+   * Refuses the first registration, in registration order, whose method and path (parameters' names aside) an earlier
+   * one has: `duplicate-api-route`, naming the route as first registered and both modules.
    */
   check(): void {
     const seen = new Map<string, Registration>();
     for (const registration of this.#registrations) {
-      const route = registration.kind === "http" ? shapeOf(registration.route) : registration.route.name;
-      const key = this.key(registration.kind, registration.route.module, route);
+      const key = this.key(registration.kind, registration.route.module, shapeOf(registration.route));
       const first = seen.get(key);
       if (first === undefined) {
         seen.set(key, registration);
         continue;
       }
-      const shown = first.kind === "http" ? `${first.route.method} ${first.route.path}` : first.route.name;
+      const shown = `${first.route.method} ${first.route.path}`;
       const modules = [first.route.module, registration.route.module];
-      const what = first.kind === "http" ? shown : `the subscription ${shown}`;
-      const who = modules[0] === modules[1] ? `${modules[0]} registers ${what} twice` : `${modules[0]} and ${modules[1]} both register ${what}`;
-      const rule = first.kind === "http" ? "a route is registered once" : "a subscription name is registered once";
-      throw new UmbraError("duplicate-api-route", `${who}: ${rule}`, {
+      const who = modules[0] === modules[1] ? `${modules[0]} registers ${shown} twice` : `${modules[0]} and ${modules[1]} both register ${shown}`;
+      throw new UmbraError("duplicate-api-route", `${who}: a route is registered once`, {
         kind: first.kind,
         route: shown,
         modules,
@@ -345,13 +315,14 @@ const specificity = (route: HttpRoute): string => route.segments.map((segment) =
 /** The module API over checked routes (see the module comment). */
 export class ModuleApi {
   readonly #http: readonly HttpRoute[];
-  readonly #subscriptions: readonly SubscriptionRoute[];
   readonly #options: ModuleApiOptions;
+  /** The process's topic bus, which subscriptions are served from. */
+  readonly topics: TopicBus;
 
   constructor(routes: ApiRoutes, options: ModuleApiOptions) {
     this.#http = routes.http;
-    this.#subscriptions = routes.subscriptions;
     this.#options = options;
+    this.topics = options.topics ?? new TopicBus();
   }
 
   /** Answers `request` (see the module comment); never rejects. */
@@ -408,45 +379,6 @@ export class ModuleApi {
       this.#report(error, { module: route.module, route: `${route.method} ${route.path}` });
       return apiErrorResponse("internal-error", INTERNAL);
     }
-  }
-
-  /**
-   * Opens subscription `name` with the subscriber's `args`: `send` gets each value the module emits, until the
-   * unsubscribe this returns is called (once; later calls do nothing). Throws an {@link ApiError} — `not-found` for a
-   * name no module registered, `internal-error` for a handler that throws or returns no unsubscribe (told to
-   * `onError`); an unsubscribe of the module that throws is told to `onError` only.
-   */
-  subscribe(name: string, args: unknown, send: (value: unknown) => void): () => void {
-    const route = this.#subscriptions.find((subscription) => subscription.name === name);
-    if (route === undefined) throw new ApiError("not-found", `no subscription is named ${name}`);
-    const where = { module: route.module, route: `subscription ${name}` };
-    let open = true;
-    const failed = (error: unknown): ApiError => {
-      open = false;
-      this.#report(error, where);
-      return new ApiError("internal-error", `the subscription ${name} could not be opened`);
-    };
-    const emit = (value: unknown): void => {
-      if (open) send(value);
-    };
-    let unsubscribe: unknown;
-    try {
-      unsubscribe = route.handler(args, emit);
-    } catch (error) {
-      throw failed(error);
-    }
-    if (typeof unsubscribe !== "function") {
-      throw failed(new Error(`the subscription handler of ${name} returned no unsubscribe function`));
-    }
-    return () => {
-      if (!open) return;
-      open = false;
-      try {
-        (unsubscribe as () => void)();
-      } catch (error) {
-        this.#report(error, where);
-      }
-    };
   }
 
   /** Tells `onError` of `error`; an `onError` that throws is ignored, so nothing it does fails an answer. */

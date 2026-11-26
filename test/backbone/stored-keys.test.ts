@@ -30,6 +30,7 @@ import { PATIENCE_MS } from "./ingest-harness.js";
 import { FIRST_VERSION } from "./ledger-refcount-halts.js";
 import { type DagRun, type DagRunOptions, runDag, runProblems } from "./refcount-process.js";
 import { made, ref } from "./run-reclaim.js";
+import { NO_TOPICS } from "../helpers/topic-sink.js";
 
 /**
  * The keys found stored that `core-ledger-state` keeps for a process context (`src/backbone/core-ledger-state/
@@ -367,7 +368,7 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
             },
             execute: (sql, params) => tx.execute(sql, params),
           };
-          await point("on-db-write")(p, b, w);
+          await point("on-db-write")(p, b, w, NO_TOPICS);
           await point("on-settle")(p, { first: height, last: height }, w);
           if (given.rollBack === true) throw new RolledBack();
         });

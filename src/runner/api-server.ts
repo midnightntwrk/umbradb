@@ -64,6 +64,8 @@ export interface ModuleApiStart extends ApiStartup {
   readonly configHash?: string;
   /** The negative controls' changes of the mounted handlers ({@link MountedApiSeams}); none unless given. */
   readonly mounted?: MountedApiSeams;
+  /** The process's topic bus, which subscriptions are served from; one with no topics unless given. */
+  readonly topics?: ModuleApiOptions["topics"];
 }
 
 /** The module API started. */
@@ -96,6 +98,7 @@ export async function startModuleApi(input: ModuleApiStart): Promise<StartedModu
     db: input.db,
     timeoutMs: input.apiReadTimeoutMs,
     ...(input.onError === undefined ? {} : { onError: input.onError }),
+    ...(input.topics === undefined ? {} : { topics: input.topics }),
   };
   const api = new ModuleApi(routes, options);
   const { configHash } = input;

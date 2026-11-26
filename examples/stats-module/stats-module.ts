@@ -1,17 +1,15 @@
 /**
  * `stats-module`, the module guide's example (`docs/module-guide.md` §2). At every height it stores one row — the
  * block's hash, how many Midnight transactions it carried, how many of them failed, and a running total — and serves
- * the rows over the module API, with a subscription that announces each new row.
+ * the rows over the module API, and publishes each new row to its topic `stats-module.blocks`.
  */
 
 import { z } from "zod";
-import { defineModule, defineRoute, hexBytes, type ParsedTransaction, RouteError, uintText } from "umbradb";
+import { defineModule, defineRoute, defineTopic, hexBytes, type ParsedTransaction, RouteError, uintText } from "umbradb";
 import { insertRow, lastTotal, migrations, recentRows, rowAt } from "./sql.ts";
 
 /** The `tx-results` item: one outcome per transaction, in `block-parsed`'s order. */
 type Outcome = "success" | "partial" | "failure";
-
-const subscribers = new Set<{ minTx: number; emit: (value: unknown) => void }>();
 
 // A stored row as the API gives it. uintText(64) is a bigint here and digits in a string to a client, which no JSON
 // reader rounds; hexBytes() is "0x" and lowercase hex.
@@ -33,6 +31,10 @@ const blockOf = (row: Record<string, unknown>): z.output<typeof Block> => ({
   failed_count: row.failed_count as number,
   total_tx: row.total_tx as bigint,
 });
+
+// The topic: each new row, sent to subscribers once its height commits. block_time is left out: it lives in the core's
+// blocks table, and on-db-write emits what it already has rather than reading the row back.
+const blocksTopic = defineTopic("blocks", Block.omit({ block_time: true }));
 
 const noRow = () => new RouteError("not-found", "no-row", "no row at that height");
 
@@ -108,11 +110,13 @@ export const statsModule = defineModule({
   // SQL migrations: they create the module's table in its own schema, once each and in order (./sql.ts).
   migrations,
 
+  // The topics it publishes to from on-db-write; subscribers name them `stats-module.<name>`.
+  topics: [blocksTopic],
+
   // The points: where the module's code runs. The runner calls each callback at its point, at startup or for every
-  // block: on-db-write inside the block's transaction, on-start-api to register routes, on-after-db-write after the
-  // commit.
+  // block: on-db-write inside the block's transaction, on-start-api to register routes.
   points: {
-    async "on-db-write"(_processContext, block, writer) {
+    async "on-db-write"(_processContext, block, writer, topics) {
       const { transactions } = block.items.get("block-parsed") as { transactions: readonly ParsedTransaction[] };
       const outcomes = block.items.get("tx-results") as readonly Outcome[]; // one per transaction, same order
       const counted = outcomes.filter(
@@ -127,6 +131,14 @@ export const statsModule = defineModule({
         failedCount: failed,
         totalTx,
       });
+      // Held until the height commits, and dropped if it does not.
+      topics.emit(blocksTopic, {
+        height: block.height,
+        hash: `0x${Buffer.from(block.hash).toString("hex")}`,
+        tx_count: counted.length,
+        failed_count: failed,
+        total_tx: totalTx,
+      });
     },
 
     async "on-start-api"(processContext, api) {
@@ -135,19 +147,6 @@ export const statsModule = defineModule({
       api.route(getLatest);
       api.route(getBlock);
       api.route(listRecent(recentLimit));
-
-      api.subscription("stats-module-blocks", (args, emit) => {
-        const subscriber = { minTx: Number((args as { minTx?: number } | null)?.minTx ?? 0), emit };
-        subscribers.add(subscriber);
-        return () => subscribers.delete(subscriber);
-      });
-    },
-
-    async "on-after-db-write"(_processContext, block, read) {
-      const row = subscribers.size > 0 ? await rowAt(read, block.height) : undefined;
-      for (const subscriber of subscribers) {
-        if (row !== undefined && Number(row.tx_count) >= subscriber.minTx) subscriber.emit(z.encode(Block, blockOf(row)));
-      }
     },
   },
 });

@@ -75,8 +75,8 @@ function marking(flag: { wrote: boolean }): ModuleDeclaration {
     ...base,
     points: {
       ...base.points,
-      async "on-db-write"(p, b, w) {
-        await write.call(base.points, p, b, w);
+      async "on-db-write"(p, b, w, t) {
+        await write.call(base.points, p, b, w, t);
         if (b.height === SLOW_HEIGHT) flag.wrote = true;
       },
     },
